@@ -108,8 +108,11 @@ def extract_audio(req: ExtractRequest):
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
-        "extractor_args": {"youtube": {"player_client": ["ios", "web"]}},
+        "extractor_args": {"youtube": {"player_client": ["tv_embedded", "ios"]}},
         "cookiefile": _get_cookies_file(),
+        "http_headers": {
+            "User-Agent": "Mozilla/5.0 (TV) AppleWebKit/537.36",
+        },
         "postprocessors": [
             {
                 "key": "FFmpegExtractAudio",
