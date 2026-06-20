@@ -135,23 +135,45 @@ def extract_audio(req: ExtractRequest):
 
     # 2차: yt-dlp fallback
     if info is None:
-        ydl_opts = {
-            "format": "ba/b",
-            "outtmpl": out_template,
+        base_opts = {
             "noplaylist": True,
             "quiet": False,
             "no_warnings": False,
             "extractor_args": {"youtube": {"player_client": ["android_music", "android", "tv_embedded"]}},
-            "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}],
         }
         cookies = _get_cookies_file()
         if cookies:
-            ydl_opts["cookiefile"] = cookies
+            base_opts["cookiefile"] = cookies
         if FFMPEG_LOCATION:
-            ydl_opts["ffmpeg_location"] = str(FFMPEG_LOCATION)
+            base_opts["ffmpeg_location"] = str(FFMPEG_LOCATION)
+
         try:
+            # 포맷 목록 먼저 가져오기
+            with yt_dlp.YoutubeDL(base_opts) as ydl:
+                meta = ydl.extract_info(url, download=False)
+
+            formats = meta.get("formats", [])
+            # 오디오 전용 우선, 없으면 아무 포맷
+            audio_only = [
+                f for f in formats
+                if f.get("vcodec") in (None, "none") and f.get("acodec") not in (None, "none")
+            ]
+            chosen = sorted(audio_only, key=lambda f: f.get("abr") or 0, reverse=True) or \
+                     sorted(formats, key=lambda f: f.get("tbr") or 0, reverse=True)
+            if not chosen:
+                raise yt_dlp.utils.DownloadError("사용 가능한 포맷 없음")
+
+            fmt_id = chosen[0]["format_id"]
+
+            ydl_opts = {
+                **base_opts,
+                "format": fmt_id,
+                "outtmpl": out_template,
+                "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}],
+            }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
+
         except yt_dlp.utils.DownloadError as e:
             ytdlp_err = str(e)
             raise HTTPException(status_code=400, detail=f"추출 실패 | pytubefix: {pytubefix_err} | yt-dlp: {ytdlp_err}")
