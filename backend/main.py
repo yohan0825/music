@@ -128,12 +128,12 @@ def extract_audio(req: ExtractRequest):
     # 2차: yt-dlp fallback
     if info is None:
         ydl_opts = {
-            "format": "bestaudio/best",
+            "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
             "outtmpl": out_template,
             "noplaylist": True,
             "quiet": True,
             "no_warnings": True,
-            "extractor_args": {"youtube": {"player_client": ["android_music", "android", "tv_embedded"]}},
+            "extractor_args": {"youtube": {"player_client": ["android_music", "android", "tv_embedded", "ios"]}},
             "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}],
         }
         cookies = _get_cookies_file()
