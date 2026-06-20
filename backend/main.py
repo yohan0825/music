@@ -15,6 +15,8 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import yt_dlp
+from pytubefix import YouTube
+from pytubefix.exceptions import PytubeFixError
 
 BASE_DIR = Path(__file__).resolve().parent
 FRONTEND_DIR = BASE_DIR.parent / "frontend"
@@ -102,32 +104,48 @@ def extract_audio(req: ExtractRequest):
     track_id = uuid.uuid4().hex[:12]
     out_template = str(DOWNLOAD_DIR / f"{track_id}.%(ext)s")
 
-    ydl_opts = {
-        "format": "bestaudio/best",
-        "outtmpl": out_template,
-        "noplaylist": True,
-        "quiet": True,
-        "no_warnings": True,
-        "extractor_args": {"youtube": {"player_client": ["android_music", "android", "tv_embedded"]}},
-        "postprocessors": [
-            {
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "mp3",
-                "preferredquality": "192",
-            }
-        ],
-    }
-    cookies = _get_cookies_file()
-    if cookies:
-        ydl_opts["cookiefile"] = cookies
-    if FFMPEG_LOCATION:
-        ydl_opts["ffmpeg_location"] = str(FFMPEG_LOCATION)
+    import subprocess
 
+    ffmpeg_bin = str(FFMPEG_LOCATION / "ffmpeg") if FFMPEG_LOCATION else "ffmpeg"
+    info = None
+
+    # 1차: pytubefix
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-    except yt_dlp.utils.DownloadError as e:
-        raise HTTPException(status_code=400, detail=f"오디오 추출 실패: {e}")
+        yt = YouTube(url)
+        audio_stream = yt.streams.get_audio_only()
+        raw_name = f"{track_id}.{audio_stream.subtype}"
+        audio_stream.download(output_path=str(DOWNLOAD_DIR), filename=raw_name)
+        raw_path = DOWNLOAD_DIR / raw_name
+        subprocess.run(
+            [ffmpeg_bin, "-y", "-i", str(raw_path), "-q:a", "2", str(DOWNLOAD_DIR / f"{track_id}.mp3")],
+            check=True, capture_output=True,
+        )
+        raw_path.unlink(missing_ok=True)
+        info = {"title": yt.title, "duration": yt.length}
+    except Exception:
+        pass
+
+    # 2차: yt-dlp fallback
+    if info is None:
+        ydl_opts = {
+            "format": "bestaudio/best",
+            "outtmpl": out_template,
+            "noplaylist": True,
+            "quiet": True,
+            "no_warnings": True,
+            "extractor_args": {"youtube": {"player_client": ["android_music", "android", "tv_embedded"]}},
+            "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}],
+        }
+        cookies = _get_cookies_file()
+        if cookies:
+            ydl_opts["cookiefile"] = cookies
+        if FFMPEG_LOCATION:
+            ydl_opts["ffmpeg_location"] = str(FFMPEG_LOCATION)
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+        except yt_dlp.utils.DownloadError as e:
+            raise HTTPException(status_code=400, detail=f"오디오 추출 실패: {e}")
 
     mp3_path = DOWNLOAD_DIR / f"{track_id}.mp3"
     if not mp3_path.exists():
