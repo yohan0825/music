@@ -1,9 +1,11 @@
 """music-mixer-app backend"""
 
+import base64
 import json
 import os
 import re
 import shutil
+import tempfile
 import uuid
 from pathlib import Path
 
@@ -30,6 +32,19 @@ else:
 DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 TRACKS_FILE = DOWNLOAD_DIR / "tracks.json"
+
+def _get_cookies_file() -> str | None:
+    b64 = os.environ.get("YT_COOKIES_B64")
+    if not b64:
+        return None
+    try:
+        content = base64.b64decode(b64).decode("utf-8")
+        f = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False)
+        f.write(content)
+        f.close()
+        return f.name
+    except Exception:
+        return None
 
 
 def _find_ffmpeg() -> Path | None:
@@ -94,6 +109,7 @@ def extract_audio(req: ExtractRequest):
         "quiet": True,
         "no_warnings": True,
         "extractor_args": {"youtube": {"player_client": ["ios", "web"]}},
+        "cookiefile": _get_cookies_file(),
         "postprocessors": [
             {
                 "key": "FFmpegExtractAudio",
