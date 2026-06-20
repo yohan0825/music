@@ -97,6 +97,31 @@ header h1 {
   padding: 20px;
 }
 
+.upload-box {
+  background: var(--surface);
+  border: 1px solid var(--border2);
+  border-top: none;
+  padding: 16px 20px;
+}
+
+.upload-drop {
+  border: 1px dashed var(--border2);
+  padding: 18px;
+  text-align: center;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: .82rem;
+  margin-top: 8px;
+  transition: background .15s, border-color .15s;
+}
+
+.upload-drop:hover,
+.upload-drop.drag-over {
+  background: #1a1a1a;
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
 .extract-label {
   display: block;
   font-size: .68rem;

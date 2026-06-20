@@ -200,6 +200,48 @@ extractForm.addEventListener('submit', async e => {
   }
 });
 
+// Upload
+const uploadDrop   = document.getElementById('upload-drop');
+const uploadInput  = document.getElementById('upload-input');
+const uploadStatus = document.getElementById('upload-status');
+
+function setUploadStatus(msg, type = '') {
+  uploadStatus.textContent = msg;
+  uploadStatus.className = 'status' + (type ? ` ${type}` : '');
+}
+
+async function uploadFiles(files) {
+  for (const file of files) {
+    setUploadStatus(`업로드 중: ${file.name} ⏳`);
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+      const res  = await fetch('/api/upload', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || '업로드 실패');
+      addTrackToList({
+        ...data,
+        stream_url: `/api/audio/${data.id}`,
+        download_url: `/api/audio/${data.id}?download=1`,
+      });
+      setUploadStatus(`"${data.title}" 업로드 완료!`, 'success');
+    } catch (err) {
+      setUploadStatus(err.message, 'error');
+    }
+  }
+}
+
+uploadDrop.addEventListener('click', () => uploadInput.click());
+uploadDrop.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') uploadInput.click(); });
+uploadInput.addEventListener('change', () => uploadFiles(Array.from(uploadInput.files)));
+uploadDrop.addEventListener('dragover', e => { e.preventDefault(); uploadDrop.classList.add('drag-over'); });
+uploadDrop.addEventListener('dragleave', () => uploadDrop.classList.remove('drag-over'));
+uploadDrop.addEventListener('drop', e => {
+  e.preventDefault();
+  uploadDrop.classList.remove('drag-over');
+  uploadFiles(Array.from(e.dataTransfer.files));
+});
+
 // Load tracks from previous session, then restore project
 (async () => {
   try {

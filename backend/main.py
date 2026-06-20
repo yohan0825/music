@@ -9,7 +9,7 @@ import tempfile
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -149,6 +149,35 @@ def extract_audio(req: ExtractRequest):
         "id": track_id,
         "title": title,
         "duration": duration,
+        "stream_url": f"/api/audio/{track_id}",
+        "download_url": f"/api/audio/{track_id}?download=1",
+    }
+
+
+@app.post("/api/upload")
+async def upload_audio(file: UploadFile = File(...)):
+    ext = Path(file.filename).suffix.lower()
+    if ext not in {".mp3", ".wav", ".ogg", ".m4a", ".flac", ".aac"}:
+        raise HTTPException(status_code=400, detail="지원하지 않는 파일 형식입니다.")
+
+    track_id = uuid.uuid4().hex[:12]
+    dest = DOWNLOAD_DIR / f"{track_id}{ext}"
+    content = await file.read()
+    dest.write_bytes(content)
+
+    title = Path(file.filename).stem
+    TRACKS[track_id] = {
+        "id": track_id,
+        "title": title,
+        "duration": None,
+        "filename": dest.name,
+    }
+    _save_tracks()
+
+    return {
+        "id": track_id,
+        "title": title,
+        "duration": None,
         "stream_url": f"/api/audio/{track_id}",
         "download_url": f"/api/audio/{track_id}?download=1",
     }
