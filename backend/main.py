@@ -108,11 +108,7 @@ def extract_audio(req: ExtractRequest):
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
-        "extractor_args": {"youtube": {"player_client": ["tv_embedded", "ios"]}},
-        "cookiefile": _get_cookies_file(),
-        "http_headers": {
-            "User-Agent": "Mozilla/5.0 (TV) AppleWebKit/537.36",
-        },
+        "extractor_args": {"youtube": {"player_client": ["android_music", "android", "tv_embedded"]}},
         "postprocessors": [
             {
                 "key": "FFmpegExtractAudio",
@@ -121,6 +117,9 @@ def extract_audio(req: ExtractRequest):
             }
         ],
     }
+    cookies = _get_cookies_file()
+    if cookies:
+        ydl_opts["cookiefile"] = cookies
     if FFMPEG_LOCATION:
         ydl_opts["ffmpeg_location"] = str(FFMPEG_LOCATION)
 
