@@ -1,5 +1,6 @@
 """music-mixer-app backend"""
 
+import json
 import os
 import re
 import shutil
@@ -16,12 +17,19 @@ import yt_dlp
 BASE_DIR = Path(__file__).resolve().parent
 FRONTEND_DIR = BASE_DIR.parent / "frontend"
 
-# 클라우드(Linux)는 /tmp, 로컬 Windows는 backend/downloads
-if os.name == "nt":
+# Railway Volume → DATA_DIR 환경변수 설정
+# 로컬 Windows → backend/downloads
+# 그 외 클라우드 임시 → /tmp/music_downloads
+DATA_DIR = os.environ.get("DATA_DIR")
+if DATA_DIR:
+    DOWNLOAD_DIR = Path(DATA_DIR)
+elif os.name == "nt":
     DOWNLOAD_DIR = BASE_DIR / "downloads"
 else:
     DOWNLOAD_DIR = Path("/tmp/music_downloads")
 DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+TRACKS_FILE = DOWNLOAD_DIR / "tracks.json"
 
 
 def _find_ffmpeg() -> Path | None:
@@ -48,7 +56,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-TRACKS: dict[str, dict] = {}
+def _load_tracks() -> dict:
+    if TRACKS_FILE.exists():
+        try:
+            return json.loads(TRACKS_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {}
+
+def _save_tracks():
+    TRACKS_FILE.write_text(json.dumps(TRACKS, ensure_ascii=False, indent=2), encoding="utf-8")
+
+TRACKS: dict[str, dict] = _load_tracks()
 
 YOUTUBE_URL_RE = re.compile(
     r"^(https?://)?(www\.)?(youtube\.com|youtu\.be|m\.youtube\.com)/.+"
@@ -104,6 +123,7 @@ def extract_audio(req: ExtractRequest):
         "duration": duration,
         "filename": mp3_path.name,
     }
+    _save_tracks()
 
     return {
         "id": track_id,
@@ -127,6 +147,7 @@ def delete_track(track_id: str):
     file_path = DOWNLOAD_DIR / track["filename"]
     if file_path.exists():
         file_path.unlink()
+    _save_tracks()
     return {"ok": True}
 
 
