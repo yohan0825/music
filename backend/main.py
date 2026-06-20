@@ -93,6 +93,7 @@ def extract_audio(req: ExtractRequest):
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
+        "extractor_args": {"youtube": {"player_client": ["ios", "web"]}},
         "postprocessors": [
             {
                 "key": "FFmpegExtractAudio",
