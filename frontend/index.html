@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>뮤직믹서</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1>🎧 뮤직믹서</h1>
+      <div class="master-bar">
+        <span class="master-label">MASTER</span>
+        <input type="range" id="master-vol" min="0" max="1.2" step="0.01" value="0.9">
+        <span id="master-vol-val">0.90</span>
+        <canvas id="vu-canvas" width="10" height="32"></canvas>
+        <canvas id="spectrum-canvas" width="80" height="32"></canvas>
+        <span id="midi-indicator" class="midi-indicator" title="Web MIDI">MIDI ○</span>
+      </div>
+      <span id="save-indicator" class="save-indicator">SAVED</span>
+    </header>
+
+    <nav class="tabs" role="tablist">
+      <button class="tab-btn active" role="tab" aria-selected="true"  data-tab="extract">🎵 추출</button>
+      <button class="tab-btn"        role="tab" aria-selected="false" data-tab="mixer">🎚 믹서</button>
+      <button class="tab-btn"        role="tab" aria-selected="false" data-tab="turntable">🎛 스튜디오</button>
+      <button class="tab-btn"        role="tab" aria-selected="false" data-tab="playlist">📋 플레이리스트</button>
+    </nav>
+
+    <!-- 추출 탭 -->
+    <div id="tab-extract" class="tab-panel active" role="tabpanel">
+      <section class="extract-box">
+        <label class="extract-label" for="url-input">유튜브 링크</label>
+        <form id="extract-form">
+          <input type="url" id="url-input" placeholder="https://www.youtube.com/watch?v=..." autocomplete="off" aria-label="유튜브 URL 입력" />
+          <button type="submit" id="extract-btn">추출하기</button>
+        </form>
+        <p id="status" class="status" role="status" aria-live="polite"></p>
+      </section>
+      <section class="tracks-section">
+        <p class="section-label">추출된 트랙</p>
+        <div id="track-empty-state" class="track-empty-state">
+          <span>🎵</span>
+          <span>아직 추출된 트랙이 없어요</span>
+          <span style="font-size:.78rem">위에 유튜브 링크를 붙여넣고 추출해보세요</span>
+        </div>
+        <ul id="track-list" class="track-list" aria-label="추출된 트랙 목록"></ul>
+      </section>
+    </div>
+
+    <!-- 믹서 탭 -->
+    <div id="tab-mixer" class="tab-panel" role="tabpanel">
+      <div class="mixer-transport" role="toolbar" aria-label="믹서 컨트롤">
+        <button id="mixer-play" class="transport-btn">▶</button>
+        <button id="mixer-stop" class="transport-btn">⏹</button>
+        <span id="mixer-time" class="transport-time" aria-live="off">0:00 / 0:00</span>
+        <label class="bpm-label">BPM</label>
+        <input type="number" id="mixer-bpm" class="bpm-input" value="120" min="40" max="240">
+        <button id="snap-toggle" class="transport-btn">SNAP</button>
+        <button id="undo-btn" class="transport-btn" title="실행 취소 (Ctrl+Z)">↩</button>
+        <button id="redo-btn" class="transport-btn" title="다시 실행 (Ctrl+Y)">↪</button>
+        <button id="mixer-export" class="transport-btn export-btn">📥 WAV</button>
+        <button id="mixer-mp3" class="transport-btn export-btn">🎵 MP3</button>
+      </div>
+      <p class="empty-hint" id="mixer-empty">추출 탭에서 <strong>[+믹서]</strong> 버튼으로 트랙을 추가하세요</p>
+      <div class="timeline-container" id="timeline-container" style="display:none">
+        <div class="timeline-label-col" id="label-col">
+          <div class="label-header">트랙</div>
+          <div id="timeline-labels"></div>
+        </div>
+        <div class="timeline-scroll" id="timeline-scroll">
+          <div class="timeline-ruler" id="timeline-ruler" role="slider" aria-label="타임라인 탐색"></div>
+          <div class="timeline-tracks" id="timeline-tracks">
+            <div class="playhead" id="playhead" aria-hidden="true"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 스튜디오 탭 -->
+    <div id="tab-turntable" class="tab-panel" role="tabpanel">
+
+      <div class="turntable-stage">
+
+        <!-- 덱 A -->
+        <div class="deck" data-deck="0">
+          <div class="vol-wrap">
+            <input type="range" class="vol-vertical" orient="vertical"
+              value="0.8" min="0" max="1" step="0.01" aria-label="덱 1 볼륨" data-deck="0">
+          </div>
+          <div class="deck-main">
+            <div class="deck-body">
+              <div class="deck-disc" data-deck="0">
+                <div class="vinyl-label">
+                  <button class="deck-assign-btn" data-deck="0" aria-label="덱 1 곡 선택">
+                    <span class="dai">+</span><span class="dan">곡 선택</span>
+                  </button>
+                </div>
+                <div class="deck-speed-badge"></div>
+              </div>
+              <div class="deck-info">
+                <div class="deck-title-text">-</div>
+                <div class="deck-pos-bpm-row">
+                  <span class="deck-pos-text">0:00 / 0:00</span>
+                  <span class="deck-bpm-text">-- BPM</span>
+                </div>
+                <div class="deck-pitch-row">
+                  <span class="deck-pitch-label">PITCH</span>
+                  <input type="range" class="deck-pitch-slider" data-deck="0" min="0.5" max="2" step="0.01" value="1">
+                  <span class="deck-pitch-val">1.00x</span>
+                </div>
+                <div class="deck-btns">
+                  <button class="deck-play-btn" data-deck="0">▶</button>
+                  <button class="deck-sync-btn" data-deck="0">SYNC</button>
+                  <button class="deck-kl-btn" data-deck="0" title="Key Lock: 템포 변경 시 음정 고정">KL</button>
+                </div>
+              </div>
+            </div>
+            <canvas class="deck-waveform" data-deck="0" height="44"></canvas>
+            <div class="deck-eq-row">
+              <div class="eq-knob-group">
+                <span class="eq-label">LOW</span>
+                <input type="range" class="eq-slider" data-deck="0" data-band="low" min="-40" max="12" step="0.5" value="0">
+                <button class="eq-kill" data-deck="0" data-band="low">KILL</button>
+              </div>
+              <div class="eq-knob-group">
+                <span class="eq-label">MID</span>
+                <input type="range" class="eq-slider" data-deck="0" data-band="mid" min="-40" max="12" step="0.5" value="0">
+                <button class="eq-kill" data-deck="0" data-band="mid">KILL</button>
+              </div>
+              <div class="eq-knob-group">
+                <span class="eq-label">HIGH</span>
+                <input type="range" class="eq-slider" data-deck="0" data-band="high" min="-40" max="12" step="0.5" value="0">
+                <button class="eq-kill" data-deck="0" data-band="high">KILL</button>
+              </div>
+              <div class="eq-knob-group">
+                <span class="eq-label">FILTER</span>
+                <input type="range" class="filter-slider" data-deck="0" min="-1" max="1" step="0.01" value="0">
+              </div>
+            </div>
+            <div class="deck-fx-row">
+              <div class="fx-group">
+                <span class="fx-label">ECHO</span>
+                <input type="range" class="echo-slider" data-deck="0" min="0" max="1" step="0.01" value="0">
+                <span class="fx-val">0%</span>
+              </div>
+              <div class="fx-group">
+                <span class="fx-label">REVERB</span>
+                <input type="range" class="reverb-slider" data-deck="0" min="0" max="1" step="0.01" value="0">
+                <span class="fx-val">0%</span>
+              </div>
+            </div>
+            <div class="deck-bottom-row">
+              <div class="loop-controls">
+                <button class="loop-btn" data-deck="0" data-action="in">IN</button>
+                <button class="loop-btn" data-deck="0" data-action="out">OUT</button>
+                <button class="loop-btn loop-toggle" data-deck="0" data-action="toggle">LOOP</button>
+              </div>
+              <div class="hotcue-row">
+                <button class="hotcue-btn" data-deck="0" data-cue="0" style="--hc:#4af">1</button>
+                <button class="hotcue-btn" data-deck="0" data-cue="1" style="--hc:#f4a">2</button>
+                <button class="hotcue-btn" data-deck="0" data-cue="2" style="--hc:#af4">3</button>
+                <button class="hotcue-btn" data-deck="0" data-cue="3" style="--hc:#fa4">4</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 크로스페이더 -->
+        <div class="deck-sep">
+          <div class="crossfader-wrap">
+            <span class="crossfader-label">A</span>
+            <input type="range" id="crossfader" min="0" max="1" step="0.001" value="0.5">
+            <span class="crossfader-label">B</span>
+          </div>
+        </div>
+
+        <!-- 덱 B -->
+        <div class="deck" data-deck="1">
+          <div class="deck-main">
+            <div class="deck-body">
+              <div class="deck-disc" data-deck="1">
+                <div class="vinyl-label">
+                  <button class="deck-assign-btn" data-deck="1" aria-label="덱 2 곡 선택">
+                    <span class="dai">+</span><span class="dan">곡 선택</span>
+                  </button>
+                </div>
+                <div class="deck-speed-badge"></div>
+              </div>
+              <div class="deck-info">
+                <div class="deck-title-text">-</div>
+                <div class="deck-pos-bpm-row">
+                  <span class="deck-pos-text">0:00 / 0:00</span>
+                  <span class="deck-bpm-text">-- BPM</span>
+                </div>
+                <div class="deck-pitch-row">
+                  <span class="deck-pitch-label">PITCH</span>
+                  <input type="range" class="deck-pitch-slider" data-deck="1" min="0.5" max="2" step="0.01" value="1">
+                  <span class="deck-pitch-val">1.00x</span>
+                </div>
+                <div class="deck-btns">
+                  <button class="deck-play-btn" data-deck="1">▶</button>
+                  <button class="deck-sync-btn" data-deck="1">SYNC</button>
+                  <button class="deck-kl-btn" data-deck="1" title="Key Lock: 템포 변경 시 음정 고정">KL</button>
+                </div>
+              </div>
+            </div>
+            <canvas class="deck-waveform" data-deck="1" height="44"></canvas>
+            <div class="deck-eq-row">
+              <div class="eq-knob-group">
+                <span class="eq-label">LOW</span>
+                <input type="range" class="eq-slider" data-deck="1" data-band="low" min="-40" max="12" step="0.5" value="0">
+                <button class="eq-kill" data-deck="1" data-band="low">KILL</button>
+              </div>
+              <div class="eq-knob-group">
+                <span class="eq-label">MID</span>
+                <input type="range" class="eq-slider" data-deck="1" data-band="mid" min="-40" max="12" step="0.5" value="0">
+                <button class="eq-kill" data-deck="1" data-band="mid">KILL</button>
+              </div>
+              <div class="eq-knob-group">
+                <span class="eq-label">HIGH</span>
+                <input type="range" class="eq-slider" data-deck="1" data-band="high" min="-40" max="12" step="0.5" value="0">
+                <button class="eq-kill" data-deck="1" data-band="high">KILL</button>
+              </div>
+              <div class="eq-knob-group">
+                <span class="eq-label">FILTER</span>
+                <input type="range" class="filter-slider" data-deck="1" min="-1" max="1" step="0.01" value="0">
+              </div>
+            </div>
+            <div class="deck-fx-row">
+              <div class="fx-group">
+                <span class="fx-label">ECHO</span>
+                <input type="range" class="echo-slider" data-deck="1" min="0" max="1" step="0.01" value="0">
+                <span class="fx-val">0%</span>
+              </div>
+              <div class="fx-group">
+                <span class="fx-label">REVERB</span>
+                <input type="range" class="reverb-slider" data-deck="1" min="0" max="1" step="0.01" value="0">
+                <span class="fx-val">0%</span>
+              </div>
+            </div>
+            <div class="deck-bottom-row">
+              <div class="loop-controls">
+                <button class="loop-btn" data-deck="1" data-action="in">IN</button>
+                <button class="loop-btn" data-deck="1" data-action="out">OUT</button>
+                <button class="loop-btn loop-toggle" data-deck="1" data-action="toggle">LOOP</button>
+              </div>
+              <div class="hotcue-row">
+                <button class="hotcue-btn" data-deck="1" data-cue="0" style="--hc:#4af">1</button>
+                <button class="hotcue-btn" data-deck="1" data-cue="1" style="--hc:#f4a">2</button>
+                <button class="hotcue-btn" data-deck="1" data-cue="2" style="--hc:#af4">3</button>
+                <button class="hotcue-btn" data-deck="1" data-cue="3" style="--hc:#fa4">4</button>
+              </div>
+            </div>
+          </div>
+          <div class="vol-wrap">
+            <input type="range" class="vol-vertical" orient="vertical"
+              value="0.8" min="0" max="1" step="0.01" aria-label="덱 2 볼륨" data-deck="1">
+          </div>
+        </div>
+      </div>
+
+      <!-- 녹음 바 -->
+      <div class="rec-bar">
+        <button id="rec-btn" class="rec-btn">⏺ REC</button>
+        <span id="rec-status" class="rec-status"></span>
+        <span class="rec-hint">모든 오디오 출력 녹음 → 추출 탭에 추가</span>
+      </div>
+
+      <div class="studio-divider"></div>
+
+      <!-- 샘플러 -->
+      <div class="sampler-section">
+        <div class="pad-grid" id="pad-grid" role="group" aria-label="샘플 패드"></div>
+        <p class="sampler-hint">
+          키보드 <kbd>1</kbd>~<kbd>9</kbd> 또는 클릭으로 재생
+          &nbsp;·&nbsp;
+          추출 탭에서 <strong>[+패드]</strong> 버튼으로 할당
+        </p>
+      </div>
+
+      <!-- 트랙 선택 모달 -->
+      <div class="track-picker-overlay" id="track-picker" style="display:none"
+           role="dialog" aria-modal="true" aria-label="트랙 선택">
+        <div class="track-picker-box">
+          <p class="section-label">트랙 선택</p>
+          <ul class="picker-list" id="picker-list"></ul>
+          <button class="btn-ghost" id="picker-cancel">취소</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 플레이리스트 탭 -->
+    <div id="tab-playlist" class="tab-panel" role="tabpanel">
+      <div class="playlist-wrap">
+        <div class="playlist-head">
+          <p class="section-label">플레이리스트</p>
+          <div class="playlist-controls">
+            <button id="pl-play" class="transport-btn">▶</button>
+            <button id="pl-stop" class="transport-btn">⏹</button>
+            <button id="pl-clear" class="btn-ghost">🗑 초기화</button>
+          </div>
+        </div>
+        <div id="pl-empty" class="track-empty-state">
+          <span>📋</span>
+          <span>플레이리스트가 비어있어요</span>
+          <span style="font-size:.78rem">추출 탭에서 [+목록] 버튼으로 추가하세요</span>
+        </div>
+        <ol id="pl-list" class="pl-list"></ol>
+        <div id="pl-now" class="pl-now" style="display:none">
+          <audio id="pl-audio" controls preload="auto"></audio>
+          <p id="pl-label" class="pl-label"></p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- 패드 개별 설정 오버레이 -->
+  <div id="pad-settings-overlay" class="pad-settings-overlay" style="display:none">
+    <div class="pad-settings-modal">
+      <div class="pad-settings-header">
+        <span id="pad-settings-title">패드 설정</span>
+        <button id="pad-settings-close">✕</button>
+      </div>
+      <div class="pad-settings-body">
+        <label>볼륨 <span id="pad-vol-val">100%</span>
+          <input type="range" id="pad-vol" min="0" max="2" step="0.01" value="1">
+        </label>
+        <label>피치 <span id="pad-pitch-val">0 st</span>
+          <input type="range" id="pad-pitch" min="-24" max="24" step="1" value="0">
+        </label>
+        <label class="pad-mode-label">재생 모드
+          <div class="pad-mode-group">
+            <button class="pad-mode-btn active" data-mode="oneshot">원샷</button>
+            <button class="pad-mode-btn" data-mode="hold">홀드</button>
+            <button class="pad-mode-btn" data-mode="loop">루프</button>
+          </div>
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
