@@ -109,26 +109,34 @@ def extract_audio(req: ExtractRequest):
     ffmpeg_bin = str(FFMPEG_LOCATION / "ffmpeg") if FFMPEG_LOCATION else "ffmpeg"
     info = None
 
-    # 1차: pytubefix
-    try:
-        yt = YouTube(url)
-        audio_stream = yt.streams.get_audio_only()
-        raw_name = f"{track_id}.{audio_stream.subtype}"
-        audio_stream.download(output_path=str(DOWNLOAD_DIR), filename=raw_name)
-        raw_path = DOWNLOAD_DIR / raw_name
-        subprocess.run(
-            [ffmpeg_bin, "-y", "-i", str(raw_path), "-q:a", "2", str(DOWNLOAD_DIR / f"{track_id}.mp3")],
-            check=True, capture_output=True,
-        )
-        raw_path.unlink(missing_ok=True)
-        info = {"title": yt.title, "duration": yt.length}
-    except Exception:
-        pass
+    pytubefix_err = None
+    ytdlp_err = None
+
+    # 1차: pytubefix (ANDROID_MUSIC client)
+    for client_name in ("ANDROID_MUSIC", "ANDROID", "IOS", "WEB"):
+        try:
+            yt = YouTube(url, client=client_name)
+            audio_stream = yt.streams.get_audio_only()
+            if not audio_stream:
+                continue
+            raw_name = f"{track_id}.{audio_stream.subtype}"
+            audio_stream.download(output_path=str(DOWNLOAD_DIR), filename=raw_name)
+            raw_path = DOWNLOAD_DIR / raw_name
+            subprocess.run(
+                [ffmpeg_bin, "-y", "-i", str(raw_path), "-q:a", "2", str(DOWNLOAD_DIR / f"{track_id}.mp3")],
+                check=True, capture_output=True,
+            )
+            raw_path.unlink(missing_ok=True)
+            info = {"title": yt.title, "duration": yt.length}
+            break
+        except Exception as e:
+            pytubefix_err = f"{client_name}: {e}"
+            continue
 
     # 2차: yt-dlp fallback
     if info is None:
         ydl_opts = {
-            "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
+            "format": "bestaudio/best",
             "outtmpl": out_template,
             "noplaylist": True,
             "quiet": True,
@@ -145,7 +153,8 @@ def extract_audio(req: ExtractRequest):
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
         except yt_dlp.utils.DownloadError as e:
-            raise HTTPException(status_code=400, detail=f"오디오 추출 실패: {e}")
+            ytdlp_err = str(e)
+            raise HTTPException(status_code=400, detail=f"추출 실패 | pytubefix: {pytubefix_err} | yt-dlp: {ytdlp_err}")
 
     mp3_path = DOWNLOAD_DIR / f"{track_id}.mp3"
     if not mp3_path.exists():
