@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import tempfile
 import uuid
 from pathlib import Path
@@ -16,7 +17,6 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import yt_dlp
 from pytubefix import YouTube
-from pytubefix.exceptions import PytubeFixError
 
 BASE_DIR = Path(__file__).resolve().parent
 FRONTEND_DIR = BASE_DIR.parent / "frontend"
@@ -136,7 +136,7 @@ def extract_audio(req: ExtractRequest):
     # 2차: yt-dlp fallback
     if info is None:
         ydl_opts = {
-            "format": "bestaudio/best",
+            "format": "ba/b",
             "outtmpl": out_template,
             "noplaylist": True,
             "quiet": False,
