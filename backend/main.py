@@ -7,8 +7,11 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
 import uuid
 from pathlib import Path
+
+import httpx
 
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
@@ -34,6 +37,20 @@ else:
 DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 TRACKS_FILE = DOWNLOAD_DIR / "tracks.json"
+RAILWAY_RELAY_URL = os.environ.get("RAILWAY_RELAY_URL", "").rstrip("/")
+
+def _relay_to_railway(mp3_path: Path, title: str):
+    if not RAILWAY_RELAY_URL:
+        return
+    try:
+        with open(mp3_path, "rb") as f:
+            with httpx.Client(timeout=120) as client:
+                client.post(
+                    f"{RAILWAY_RELAY_URL}/api/upload",
+                    files={"file": (f"{title}.mp3", f, "audio/mpeg")},
+                )
+    except Exception:
+        pass
 
 def _get_cookies_file() -> str | None:
     b64 = os.environ.get("YT_COOKIES_B64")
@@ -192,6 +209,9 @@ def extract_audio(req: ExtractRequest):
         "filename": mp3_path.name,
     }
     _save_tracks()
+
+    # Railway로 백그라운드 릴레이
+    threading.Thread(target=_relay_to_railway, args=(mp3_path, title), daemon=True).start()
 
     return {
         "id": track_id,
