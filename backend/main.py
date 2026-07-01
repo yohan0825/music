@@ -120,42 +120,36 @@ def extract_audio(req: ExtractRequest):
 
     track_id = uuid.uuid4().hex[:12]
     out_template = str(DOWNLOAD_DIR / f"{track_id}.%(ext)s")
-
-    import subprocess
-
     ffmpeg_bin = str(FFMPEG_LOCATION / "ffmpeg") if FFMPEG_LOCATION else "ffmpeg"
     info = None
 
-    pytubefix_err = None
-    ytdlp_err = None
-
-    # 1차: pytubefix (ANDROID_MUSIC client)
-    for client_name in ("ANDROID_MUSIC", "ANDROID", "IOS", "WEB"):
-        try:
-            yt = YouTube(url, client=client_name)
-            audio_stream = yt.streams.get_audio_only()
-            if not audio_stream:
-                continue
-            raw_name = f"{track_id}.{audio_stream.subtype}"
-            audio_stream.download(output_path=str(DOWNLOAD_DIR), filename=raw_name)
-            raw_path = DOWNLOAD_DIR / raw_name
-            subprocess.run(
-                [ffmpeg_bin, "-y", "-i", str(raw_path), "-q:a", "2", str(DOWNLOAD_DIR / f"{track_id}.mp3")],
-                check=True, capture_output=True,
+    # 1차: cobalt.tools API
+    try:
+        with httpx.Client(timeout=60) as client:
+            resp = client.post(
+                "https://api.cobalt.tools/",
+                json={"url": url, "downloadMode": "audio", "audioFormat": "mp3", "audioBitrate": "192"},
+                headers={"Accept": "application/json", "Content-Type": "application/json"},
             )
-            raw_path.unlink(missing_ok=True)
-            info = {"title": yt.title, "duration": yt.length}
-            break
-        except Exception as e:
-            pytubefix_err = f"{client_name}: {e}"
-            continue
+            data = resp.json()
+        stream_url = data.get("url")
+        if stream_url and data.get("status") in ("stream", "redirect", "tunnel"):
+            with httpx.Client(timeout=120, follow_redirects=True) as client:
+                r = client.get(stream_url)
+                r.raise_for_status()
+            mp3_path = DOWNLOAD_DIR / f"{track_id}.mp3"
+            mp3_path.write_bytes(r.content)
+            title = data.get("filename", "Untitled").removesuffix(".mp3")
+            info = {"title": title, "duration": None}
+    except Exception:
+        pass
 
     # 2차: yt-dlp fallback
     if info is None:
         base_opts = {
             "noplaylist": True,
-            "quiet": False,
-            "no_warnings": False,
+            "quiet": True,
+            "no_warnings": True,
             "extractor_args": {"youtube": {"player_client": ["android_music", "android", "tv_embedded"]}},
         }
         cookies = _get_cookies_file()
@@ -163,44 +157,28 @@ def extract_audio(req: ExtractRequest):
             base_opts["cookiefile"] = cookies
         if FFMPEG_LOCATION:
             base_opts["ffmpeg_location"] = str(FFMPEG_LOCATION)
-
         try:
-            # 포맷 목록 먼저 가져오기
             with yt_dlp.YoutubeDL(base_opts) as ydl:
                 meta = ydl.extract_info(url, download=False)
-
             formats = meta.get("formats", [])
-            # 오디오 전용 우선, 없으면 아무 포맷
-            audio_only = [
-                f for f in formats
-                if f.get("vcodec") in (None, "none") and f.get("acodec") not in (None, "none")
-            ]
+            audio_only = [f for f in formats if f.get("vcodec") in (None, "none") and f.get("acodec") not in (None, "none")]
             chosen = sorted(audio_only, key=lambda f: f.get("abr") or 0, reverse=True) or \
                      sorted(formats, key=lambda f: f.get("tbr") or 0, reverse=True)
             if not chosen:
-                raise yt_dlp.utils.DownloadError("사용 가능한 포맷 없음")
-
-            fmt_id = chosen[0]["format_id"]
-
-            ydl_opts = {
-                **base_opts,
-                "format": fmt_id,
-                "outtmpl": out_template,
-                "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}],
-            }
+                raise yt_dlp.utils.DownloadError("포맷 없음")
+            ydl_opts = {**base_opts, "format": chosen[0]["format_id"], "outtmpl": out_template,
+                        "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}]}
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
-
         except yt_dlp.utils.DownloadError as e:
-            ytdlp_err = str(e)
-            raise HTTPException(status_code=400, detail=f"추출 실패 | pytubefix: {pytubefix_err} | yt-dlp: {ytdlp_err}")
+            raise HTTPException(status_code=400, detail=f"오디오 추출 실패: {e}")
 
     mp3_path = DOWNLOAD_DIR / f"{track_id}.mp3"
     if not mp3_path.exists():
         raise HTTPException(status_code=500, detail="오디오 파일 생성에 실패했습니다.")
 
-    title = info.get("title", "Untitled")
-    duration = info.get("duration")
+    title = info.get("title", "Untitled") if isinstance(info, dict) else "Untitled"
+    duration = info.get("duration") if isinstance(info, dict) else None
 
     TRACKS[track_id] = {
         "id": track_id,
