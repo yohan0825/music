@@ -6,3 +6,6 @@ __pycache__/
 *.pyo
 .DS_Store
 *.log
+
+www.youtube.com_cookies.txt
+*_cookies.txt

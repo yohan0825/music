@@ -1,25 +1,21 @@
-"""music-mixer-app backend"""
+"""music-mixer-app backend (Railway).
 
-import base64
+추출은 하지 않는다. 아이패드/PC가 유튜브 링크를 넣으면 큐에 쌓아두고,
+집 PC에서 도는 worker.py가 큐를 폴링해 yt-dlp로 추출한 뒤 /api/upload로 올린다.
+"""
+
 import json
 import os
 import re
-import shutil
-import subprocess
-import tempfile
 import threading
 import uuid
 from pathlib import Path
 
-import httpx
-
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-import yt_dlp
-from pytubefix import YouTube
 
 BASE_DIR = Path(__file__).resolve().parent
 FRONTEND_DIR = BASE_DIR.parent / "frontend"
@@ -37,49 +33,10 @@ else:
 DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 TRACKS_FILE = DOWNLOAD_DIR / "tracks.json"
-RAILWAY_RELAY_URL = os.environ.get("RAILWAY_RELAY_URL", "").rstrip("/")
+QUEUE_FILE = DOWNLOAD_DIR / "queue.json"
 
-def _relay_to_railway(mp3_path: Path, title: str):
-    if not RAILWAY_RELAY_URL:
-        return
-    try:
-        with open(mp3_path, "rb") as f:
-            with httpx.Client(timeout=120) as client:
-                client.post(
-                    f"{RAILWAY_RELAY_URL}/api/upload",
-                    files={"file": (f"{title}.mp3", f, "audio/mpeg")},
-                )
-    except Exception:
-        pass
-
-def _get_cookies_file() -> str | None:
-    b64 = os.environ.get("YT_COOKIES_B64")
-    if not b64:
-        return None
-    try:
-        content = base64.b64decode(b64).decode("utf-8")
-        f = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False)
-        f.write(content)
-        f.close()
-        return f.name
-    except Exception:
-        return None
-
-
-def _find_ffmpeg() -> Path | None:
-    """시스템 PATH 우선, 없으면 Windows winget 경로 탐색."""
-    if shutil.which("ffmpeg"):
-        return None  # PATH에 있으면 yt-dlp가 자동으로 찾음
-    base = Path.home() / "AppData/Local/Microsoft/WinGet/Packages"
-    for pkg in base.glob("Gyan.FFmpeg_*"):
-        for build in sorted(pkg.glob("ffmpeg-*-full_build"), reverse=True):
-            bin_dir = build / "bin"
-            if (bin_dir / "ffmpeg.exe").exists():
-                return bin_dir
-    return None
-
-
-FFMPEG_LOCATION = _find_ffmpeg()
+# 로컬 워커가 큐를 폴링할 때 쓰는 인증 토큰 (없으면 인증 생략)
+WORKER_TOKEN = os.environ.get("WORKER_TOKEN", "")
 
 app = FastAPI(title="Music Mixer")
 
@@ -90,22 +47,38 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-def _load_tracks() -> dict:
-    if TRACKS_FILE.exists():
+_lock = threading.Lock()
+
+
+def _load_json(path: Path, default):
+    if path.exists():
         try:
-            return json.loads(TRACKS_FILE.read_text(encoding="utf-8"))
+            return json.loads(path.read_text(encoding="utf-8"))
         except Exception:
             pass
-    return {}
+    return default
+
 
 def _save_tracks():
     TRACKS_FILE.write_text(json.dumps(TRACKS, ensure_ascii=False, indent=2), encoding="utf-8")
 
-TRACKS: dict[str, dict] = _load_tracks()
+
+def _save_queue():
+    QUEUE_FILE.write_text(json.dumps(QUEUE, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+TRACKS: dict[str, dict] = _load_json(TRACKS_FILE, {})
+# QUEUE: qid -> {id, url, status: pending|processing|error, title, error}
+QUEUE: dict[str, dict] = _load_json(QUEUE_FILE, {})
 
 YOUTUBE_URL_RE = re.compile(
     r"^(https?://)?(www\.)?(youtube\.com|youtu\.be|m\.youtube\.com)/.+"
 )
+
+
+def _check_token(token: str):
+    if WORKER_TOKEN and token != WORKER_TOKEN:
+        raise HTTPException(status_code=401, detail="인증 실패")
 
 
 class ExtractRequest(BaseModel):
@@ -113,84 +86,64 @@ class ExtractRequest(BaseModel):
 
 
 @app.post("/api/extract")
-def extract_audio(req: ExtractRequest):
+def enqueue_extract(req: ExtractRequest):
+    """유튜브 링크를 추출 큐에 넣는다 (실제 추출은 집 PC 워커가 함)."""
     url = req.url.strip()
     if not url or not YOUTUBE_URL_RE.match(url):
         raise HTTPException(status_code=400, detail="유효한 유튜브 링크를 입력해주세요.")
 
-    track_id = uuid.uuid4().hex[:12]
-    out_template = str(DOWNLOAD_DIR / f"{track_id}.%(ext)s")
-    ffmpeg_bin = str(FFMPEG_LOCATION / "ffmpeg") if FFMPEG_LOCATION else "ffmpeg"
-    info = None
+    qid = uuid.uuid4().hex[:12]
+    with _lock:
+        QUEUE[qid] = {"id": qid, "url": url, "status": "pending", "title": None, "error": None}
+        _save_queue()
 
-    # 1차: cobalt.tools API
-    try:
-        with httpx.Client(timeout=60) as client:
-            resp = client.post(
-                "https://api.cobalt.tools/",
-                json={"url": url, "downloadMode": "audio", "audioFormat": "mp3", "audioBitrate": "192"},
-                headers={"Accept": "application/json", "Content-Type": "application/json"},
-            )
-            data = resp.json()
-        stream_url = data.get("url")
-        if stream_url and data.get("status") in ("stream", "redirect", "tunnel"):
-            with httpx.Client(timeout=120, follow_redirects=True) as client:
-                r = client.get(stream_url)
-                r.raise_for_status()
-            mp3_path = DOWNLOAD_DIR / f"{track_id}.mp3"
-            mp3_path.write_bytes(r.content)
-            title = data.get("filename", "Untitled").removesuffix(".mp3")
-            info = {"title": title, "duration": None}
-    except Exception:
-        pass
+    return {"queued": True, "queue_id": qid,
+            "message": "추출 대기열에 추가됐어요. 집 PC가 켜져 있으면 곧 라이브러리에 나타나요."}
 
-    # 2차: yt-dlp fallback
-    if info is None:
-        base_opts = {
-            "noplaylist": True,
-            "quiet": True,
-            "no_warnings": True,
-            "extractor_args": {"youtube": {"player_client": ["android_music", "android", "tv_embedded"]}},
-        }
-        cookies = _get_cookies_file()
-        if cookies:
-            base_opts["cookiefile"] = cookies
-        if FFMPEG_LOCATION:
-            base_opts["ffmpeg_location"] = str(FFMPEG_LOCATION)
-        try:
-            with yt_dlp.YoutubeDL(base_opts) as ydl:
-                meta = ydl.extract_info(url, download=False)
-            formats = meta.get("formats", [])
-            audio_only = [f for f in formats if f.get("vcodec") in (None, "none") and f.get("acodec") not in (None, "none")]
-            chosen = sorted(audio_only, key=lambda f: f.get("abr") or 0, reverse=True) or \
-                     sorted(formats, key=lambda f: f.get("tbr") or 0, reverse=True)
-            if not chosen:
-                raise yt_dlp.utils.DownloadError("포맷 없음")
-            ydl_opts = {**base_opts, "format": chosen[0]["format_id"], "outtmpl": out_template,
-                        "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}]}
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-        except yt_dlp.utils.DownloadError as e:
-            raise HTTPException(status_code=400, detail=f"오디오 추출 실패: {e}")
 
-    mp3_path = DOWNLOAD_DIR / f"{track_id}.mp3"
-    if not mp3_path.exists():
-        raise HTTPException(status_code=500, detail="오디오 파일 생성에 실패했습니다.")
+@app.get("/api/queue")
+def list_queue():
+    """대기/처리 중인 항목 (UI 표시용)."""
+    return [q for q in QUEUE.values() if q["status"] in ("pending", "processing", "error")]
 
-    title = info.get("title", "Untitled") if isinstance(info, dict) else "Untitled"
-    duration = info.get("duration") if isinstance(info, dict) else None
 
-    TRACKS[track_id] = {
-        "id": track_id,
-        "title": title,
-        "duration": duration,
-        "filename": mp3_path.name,
-    }
+@app.get("/api/queue/next")
+def claim_next(token: str = Query("")):
+    """워커가 다음 작업을 가져간다. 없으면 빈 응답."""
+    _check_token(token)
+    with _lock:
+        for q in QUEUE.values():
+            if q["status"] == "pending":
+                q["status"] = "processing"
+                _save_queue()
+                return {"queue_id": q["id"], "url": q["url"]}
+    return {}
+
+
+@app.post("/api/queue/{qid}/fail")
+def fail_queue(qid: str, token: str = Query(""), error: str = Form("")):
+    """워커가 추출 실패를 보고한다."""
+    _check_token(token)
+    with _lock:
+        q = QUEUE.get(qid)
+        if q:
+            q["status"] = "error"
+            q["error"] = error[:300]
+            _save_queue()
+    return {"ok": True}
+
+
+@app.delete("/api/queue/{qid}")
+def remove_queue(qid: str):
+    with _lock:
+        QUEUE.pop(qid, None)
+        _save_queue()
+    return {"ok": True}
+
+
+def _register_track(track_id: str, title: str, duration, filename: str):
+    TRACKS[track_id] = {"id": track_id, "title": title, "duration": duration, "filename": filename}
     _save_tracks()
-
-    # Railway로 백그라운드 릴레이
-    threading.Thread(target=_relay_to_railway, args=(mp3_path, title), daemon=True).start()
-
     return {
         "id": track_id,
         "title": title,
@@ -201,7 +154,18 @@ def extract_audio(req: ExtractRequest):
 
 
 @app.post("/api/upload")
-async def upload_audio(file: UploadFile = File(...)):
+async def upload_audio(
+    file: UploadFile = File(...),
+    title: str = Form(""),
+    duration: float | None = Form(None),
+    queue_id: str = Form(""),
+    token: str = Form(""),
+):
+    """파일 업로드. 로컬 워커가 추출 결과를 올릴 때도 이 엔드포인트를 쓴다."""
+    # 워커가 올리는 경우(queue_id 있음)만 토큰 검사
+    if queue_id:
+        _check_token(token)
+
     ext = Path(file.filename).suffix.lower()
     if ext not in {".mp3", ".wav", ".ogg", ".m4a", ".flac", ".aac"}:
         raise HTTPException(status_code=400, detail="지원하지 않는 파일 형식입니다.")
@@ -211,22 +175,15 @@ async def upload_audio(file: UploadFile = File(...)):
     content = await file.read()
     dest.write_bytes(content)
 
-    title = Path(file.filename).stem
-    TRACKS[track_id] = {
-        "id": track_id,
-        "title": title,
-        "duration": None,
-        "filename": dest.name,
-    }
-    _save_tracks()
+    resolved_title = title.strip() or Path(file.filename).stem
+    result = _register_track(track_id, resolved_title, duration, dest.name)
 
-    return {
-        "id": track_id,
-        "title": title,
-        "duration": None,
-        "stream_url": f"/api/audio/{track_id}",
-        "download_url": f"/api/audio/{track_id}?download=1",
-    }
+    if queue_id:
+        with _lock:
+            QUEUE.pop(queue_id, None)
+            _save_queue()
+
+    return result
 
 
 @app.get("/api/tracks")

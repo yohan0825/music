@@ -132,6 +132,7 @@ const trackEmptyState = document.getElementById('track-empty-state');
 
 function addTrackToList(track) {
   tracks.push(track);
+  knownTrackIds.add(track.id);
   trackEmptyState.style.display = 'none';
 
   const li = document.createElement('li');
@@ -177,7 +178,7 @@ extractForm.addEventListener('submit', async e => {
   const url = urlInput.value.trim();
   if (!url) return;
   extractBtn.disabled = true;
-  setStatus('오디오 추출 중... 영상 길이에 따라 시간이 걸릴 수 있어요 ⏳');
+  setStatus('대기열에 추가하는 중... ⏳');
   try {
     const res  = await fetch('/api/extract', {
       method: 'POST',
@@ -185,20 +186,60 @@ extractForm.addEventListener('submit', async e => {
       body: JSON.stringify({ url }),
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || '추출 실패');
-    addTrackToList({
-      ...data,
-      stream_url: `/api/audio/${data.id}`,
-      download_url: `/api/audio/${data.id}?download=1`,
-    });
-    setStatus(`"${data.title}" 추출 완료!`, 'success');
+    if (!res.ok) throw new Error(data.detail || '추가 실패');
+    setStatus(data.message || '대기열에 추가됐어요. 집 PC가 처리하면 아래에 나타나요 ⏳', 'success');
     urlInput.value = '';
+    startQueuePolling();
   } catch (err) {
     setStatus(err.message, 'error');
   } finally {
     extractBtn.disabled = false;
   }
 });
+
+// ── 추출 큐 폴링: 워커가 처리하면 라이브러리에 자동 등장 ──
+const knownTrackIds = new Set();
+let queuePollTimer = null;
+
+async function refreshTracks() {
+  try {
+    const list = await (await fetch('/api/tracks')).json();
+    for (const t of list) {
+      if (knownTrackIds.has(t.id)) continue;
+      knownTrackIds.add(t.id);
+      addTrackToList({
+        ...t,
+        stream_url: `/api/audio/${t.id}`,
+        download_url: `/api/audio/${t.id}?download=1`,
+      });
+    }
+  } catch {}
+}
+
+async function pollQueueTick() {
+  await refreshTracks();
+  let queue = [];
+  try { queue = await (await fetch('/api/queue')).json(); } catch {}
+  const active = queue.filter(q => q.status === 'pending' || q.status === 'processing');
+  const failed = queue.filter(q => q.status === 'error');
+  if (active.length) {
+    setStatus(`대기 중 ${active.length}곡 — 집 PC가 처리 중이에요 ⏳`);
+  } else {
+    if (failed.length) setStatus(`추출 실패 ${failed.length}곡 (집 PC가 꺼져있거나 링크 오류)`, 'error');
+    stopQueuePolling();
+  }
+}
+
+function startQueuePolling() {
+  if (queuePollTimer) return;
+  pollQueueTick();
+  queuePollTimer = setInterval(pollQueueTick, 4000);
+}
+
+function stopQueuePolling() {
+  clearInterval(queuePollTimer);
+  queuePollTimer = null;
+}
 
 // Upload
 const uploadDrop   = document.getElementById('upload-drop');
@@ -244,15 +285,13 @@ uploadDrop.addEventListener('drop', e => {
 
 // Load tracks from previous session, then restore project
 (async () => {
-  try {
-    const list = await (await fetch('/api/tracks')).json();
-    list.forEach(t => addTrackToList({
-      ...t,
-      stream_url: `/api/audio/${t.id}`,
-      download_url: `/api/audio/${t.id}?download=1`,
-    }));
-  } catch {}
+  await refreshTracks();
   restoreProject();
+  // 이전에 넣어둔 대기열이 남아있으면 폴링 재개
+  try {
+    const queue = await (await fetch('/api/queue')).json();
+    if (queue.some(q => q.status === 'pending' || q.status === 'processing')) startQueuePolling();
+  } catch {}
 })();
 
 // ─────────────────────────────────────────────
