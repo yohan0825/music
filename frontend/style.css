@@ -1468,8 +1468,18 @@ header { position: relative; }
 .pad-mode-btn.active { border-color: #4af; color: #4af; background: #0a1a2a; }
 
 /* ─── 터치 대응 ──────────────────────────────── */
-/* 더블탭 확대 방지 (스크롤·핀치 확대는 유지 — 접근성) */
+/* 더블탭 확대 방지 */
 * { touch-action: manipulation; }
+/* 길게 눌러도 파란 텍스트 선택/콜아웃이 뜨지 않게 (입력창만 예외) */
+body {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+input, textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}
 /* 드래그로 조작하는 요소: 브라우저 스크롤/제스처 완전 차단 + iOS 길게누르기 콜아웃 방지 */
 .deck-disc, .track-block, .trim-handle, .pad, .hotcue-btn, .auto-canvas {
   touch-action: none;

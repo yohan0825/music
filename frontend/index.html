@@ -2,9 +2,9 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
 <title>뮤직믹서</title>
-<link rel="stylesheet" href="style.css?v=5" />
+<link rel="stylesheet" href="style.css?v=6" />
 </head>
 <body>
   <div class="app">
@@ -308,6 +308,11 @@
         <span class="rec-hint">모든 오디오 출력 녹음 → 추출 탭에 추가</span>
       </div>
 
+      <p class="sampler-hint">
+        핫큐 <kbd>1</kbd>~<kbd>4</kbd>: 탭 = 저장·이동, 길게 누르면 삭제
+        &nbsp;·&nbsp; 디스크 드래그 = 스크래치 (감도는 위 슬라이더)
+      </p>
+
       <!-- 트랙 선택 모달 -->
       <div class="track-picker-overlay" id="track-picker" style="display:none"
            role="dialog" aria-modal="true" aria-label="트랙 선택">
@@ -385,6 +390,6 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js"></script>
-  <script src="app.js?v=5"></script>
+  <script src="app.js?v=6"></script>
 </body>
 </html>
