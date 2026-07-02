@@ -99,8 +99,9 @@ def _report_fail(qid: str, error: str):
     try:
         httpx.post(f"{RAILWAY_URL}/api/queue/{qid}/fail",
                    params={"token": WORKER_TOKEN}, data={"error": error}, timeout=30)
-    except Exception:
-        pass
+    except Exception as e:
+        # 보고까지 실패하면 서버 큐는 '처리 중'으로 남아 10분 뒤에야 재시도됨 — 흔적은 남긴다
+        log.warning("실패 보고도 실패 (queue_id=%s): %s", qid, e)
 
 
 def process(job: dict):
