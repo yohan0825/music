@@ -30,9 +30,18 @@ let mixerSources = [];
 // ─────────────────────────────────────────────
 function getCtx() {
   if (!audioCtx) audioCtx = new AudioContext();
-  if (audioCtx.state === 'suspended') audioCtx.resume();
+  if (audioCtx.state !== 'running') audioCtx.resume();
   return audioCtx;
 }
+
+// iOS Safari: AudioContext는 사용자 제스처 안에서 생성/resume해야 잠금이 풀린다.
+// 첫 터치/클릭에서 선제적으로 unlock (재생 버튼이 첫 탭이 아니어도 소리가 나게).
+document.addEventListener('pointerdown', () => { getCtx(); }, { once: true, capture: true });
+
+// 전화·시리 등으로 오디오가 중단(interrupted)됐다가 돌아왔을 때 재개
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && audioCtx && audioCtx.state !== 'running') audioCtx.resume();
+});
 
 let masterGain = null;
 let masterVolNode = null;
