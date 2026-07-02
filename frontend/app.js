@@ -1606,7 +1606,10 @@ document.querySelectorAll('.deck-sync-btn').forEach(btn => {
     const sl = document.querySelector(`.deck-pitch-slider[data-deck="${idx}"]`);
     const val = document.querySelector(`.deck-pitch-val`);
     if (sl) { sl.value = d.baseRate; sl.closest('.deck-pitch-row').querySelector('.deck-pitch-val').textContent = d.baseRate.toFixed(2) + 'x'; }
+    d.keyLockBuffer = null; // 배속이 바뀌었으니 이전 KL 버퍼는 무효
     if (d.isPlaying && !d.isDragging) { snapshotDeckPos(d); d.targetRate = d.baseRate; d.isReversed = false; startDeckSource(d); }
+    if (d.keyLockEnabled) processKeyLock(d);
+    updateDeckUI(d);
     setStatus(`덱 ${idx + 1} → ${d.baseRate.toFixed(2)}x (${other.bpm} BPM 맞춤)`, 'success');
   });
 });
@@ -2074,25 +2077,63 @@ document.getElementById('mixer-mp3').addEventListener('click', async () => {
 // ─────────────────────────────────────────────
 // Key Lock (Master Tempo) — OLA time-stretch via Web Worker
 // ─────────────────────────────────────────────
+// WSOLA 타임스트레치: 프레임을 겹칠 때 이전 프레임의 자연스러운 연속 지점과
+// 가장 비슷한(교차상관 최대) 위치를 골라 붙여 위상 불일치로 인한 금속성 소리를 없앤다.
 const KL_WORKER_SRC = `
 self.onmessage = function({data: {channels, rate, numSamples}}) {
-  if (Math.abs(rate - 1) < 0.005) { self.postMessage({result: channels}); return; }
-  const WIN = 1024, HOP_IN = 256;
-  const HOP_OUT = Math.max(1, Math.round(HOP_IN / rate));
-  const outLen = Math.max(1, Math.round(numSamples / rate));
+  if (Math.abs(rate - 1) < 0.01) {
+    self.postMessage({result: channels}, channels.map(c => c.buffer));
+    return;
+  }
+  const WIN = 2048, HOP = 1024;   // 50% 오버랩 (Hann)
+  const TOL = 441;                // 정렬 탐색 범위 ±10ms@44.1kHz
+  const STEP = 4, CMP = 256;      // 후보 간격 / 비교 샘플 수
+  const outLen = Math.max(WIN + HOP, Math.round(numSamples / rate));
   const hann = new Float32Array(WIN);
   for (let i = 0; i < WIN; i++) hann[i] = 0.5 * (1 - Math.cos(6.2831853 * i / WIN));
+
+  // 정렬은 모노 믹스 기준으로 한 번만 계산 (스테레오 위상 일치 유지)
+  const nCh = channels.length;
+  let mono = channels[0];
+  if (nCh > 1) {
+    mono = new Float32Array(numSamples);
+    for (let i = 0; i < numSamples; i++) {
+      let s = 0;
+      for (let c = 0; c < nCh; c++) s += channels[c][i];
+      mono[i] = s / nCh;
+    }
+  }
+
+  const positions = [];
+  let prevPos = -1;
+  for (let oPos = 0; oPos + WIN <= outLen; oPos += HOP) {
+    const ideal = Math.round(oPos * rate);
+    let best = Math.min(Math.max(ideal, 0), numSamples - WIN);
+    if (prevPos >= 0 && best > 0) {
+      const natural = Math.min(prevPos + HOP, numSamples - WIN);
+      const lo = Math.max(0, ideal - TOL);
+      const hi = Math.min(numSamples - WIN, ideal + TOL);
+      let bestScore = -Infinity;
+      for (let cand = lo; cand <= hi; cand += STEP) {
+        let score = 0;
+        for (let i = 0; i < CMP; i += 2) score += mono[natural + i] * mono[cand + i];
+        if (score > bestScore) { bestScore = score; best = cand; }
+      }
+    }
+    positions.push(best);
+    prevPos = best;
+  }
+
   const result = [];
   for (const inp of channels) {
     const out = new Float32Array(outLen);
     const norm = new Float32Array(outLen);
-    let iPos = 0, oPos = 0;
-    while (iPos + WIN <= numSamples && oPos + WIN <= outLen) {
+    for (let k = 0; k < positions.length; k++) {
+      const iPos = positions[k], oPos = k * HOP;
       for (let i = 0; i < WIN; i++) {
-        const end = oPos + i;
-        if (end < outLen) { out[end] += inp[iPos + i] * hann[i]; norm[end] += hann[i] * hann[i]; }
+        out[oPos + i] += inp[iPos + i] * hann[i];
+        norm[oPos + i] += hann[i] * hann[i];
       }
-      iPos += HOP_IN; oPos += HOP_OUT;
     }
     for (let i = 0; i < outLen; i++) if (norm[i] > 1e-6) out[i] /= norm[i];
     result.push(out);
@@ -2104,7 +2145,8 @@ const klWorkerUrl = URL.createObjectURL(new Blob([KL_WORKER_SRC], {type: 'applic
 
 function processKeyLock(d) {
   if (!d.buffer || !d.keyLockEnabled) { d.keyLockBuffer = null; return; }
-  if (Math.abs(d.baseRate - 1) < 0.005) { d.keyLockBuffer = null; return; }
+  // 원속도(±1%)에서는 처리 자체를 안 함 — KL 켜기만 해도 소리가 변하지 않게
+  if (Math.abs(d.baseRate - 1) < 0.01) { d.keyLockBuffer = null; return; }
   d.keyLockProcessing = true;
   setStatus(`덱 ${d.idx + 1} Key Lock 처리 중…`, 'info');
   const worker = new Worker(klWorkerUrl);
