@@ -924,7 +924,7 @@ function addToPad(track) {
   pads[idx] = { id: track.id, title: track.title, duration: track.duration, buffer: null, padVolume: 1, padPitch: 0, padMode: 'oneshot' };
   renderPads();
   scheduleSave();
-  document.querySelector('[data-tab="turntable"]').click();
+  document.querySelector('[data-tab="pads"]').click();
 }
 
 document.addEventListener('keydown', e => {

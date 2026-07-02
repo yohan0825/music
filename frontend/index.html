@@ -24,7 +24,8 @@
     <nav class="tabs" role="tablist">
       <button class="tab-btn active" role="tab" aria-selected="true"  data-tab="extract">🎵 추출</button>
       <button class="tab-btn"        role="tab" aria-selected="false" data-tab="mixer">🎚 믹서</button>
-      <button class="tab-btn"        role="tab" aria-selected="false" data-tab="turntable">🎛 스튜디오</button>
+      <button class="tab-btn"        role="tab" aria-selected="false" data-tab="turntable">🎛 턴테이블</button>
+      <button class="tab-btn"        role="tab" aria-selected="false" data-tab="pads">🥁 패드</button>
       <button class="tab-btn"        role="tab" aria-selected="false" data-tab="playlist">📋 플레이리스트</button>
     </nav>
 
@@ -280,18 +281,6 @@
         <span class="rec-hint">모든 오디오 출력 녹음 → 추출 탭에 추가</span>
       </div>
 
-      <div class="studio-divider"></div>
-
-      <!-- 샘플러 -->
-      <div class="sampler-section">
-        <div class="pad-grid" id="pad-grid" role="group" aria-label="샘플 패드"></div>
-        <p class="sampler-hint">
-          키보드 <kbd>1</kbd>~<kbd>9</kbd> 또는 클릭으로 재생
-          &nbsp;·&nbsp;
-          추출 탭에서 <strong>[+패드]</strong> 버튼으로 할당
-        </p>
-      </div>
-
       <!-- 트랙 선택 모달 -->
       <div class="track-picker-overlay" id="track-picker" style="display:none"
            role="dialog" aria-modal="true" aria-label="트랙 선택">
@@ -300,6 +289,20 @@
           <ul class="picker-list" id="picker-list"></ul>
           <button class="btn-ghost" id="picker-cancel">취소</button>
         </div>
+      </div>
+    </div>
+
+    <!-- 패드 탭 -->
+    <div id="tab-pads" class="tab-panel" role="tabpanel">
+      <div class="sampler-section">
+        <div class="pad-grid" id="pad-grid" role="group" aria-label="샘플 패드"></div>
+        <p class="sampler-hint">
+          키보드 <kbd>1</kbd>~<kbd>9</kbd> 또는 탭으로 재생
+          &nbsp;·&nbsp;
+          추출 탭에서 <strong>[+패드]</strong> 버튼으로 할당
+          &nbsp;·&nbsp;
+          ⚙ 또는 길게 눌러 패드 설정
+        </p>
       </div>
     </div>
 
