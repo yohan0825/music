@@ -1402,6 +1402,17 @@ header { position: relative; }
 }
 .pad-mode-btn.active { border-color: #4af; color: #4af; background: #0a1a2a; }
 
+/* ─── 터치 대응 ──────────────────────────────── */
+/* 더블탭 확대 방지 (스크롤·핀치 확대는 유지 — 접근성) */
+* { touch-action: manipulation; }
+/* 드래그로 조작하는 요소: 브라우저 스크롤/제스처 완전 차단 + iOS 길게누르기 콜아웃 방지 */
+.deck-disc, .track-block, .trim-handle, .pad, .hotcue-btn, .auto-canvas {
+  touch-action: none;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 /* ─── Extract queue ──────────────────────────── */
 .queue-section { margin-top: 14px; }
 .queue-list {
