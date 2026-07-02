@@ -804,29 +804,50 @@ function renderPads() {
       ? `<span class="pad-num">${i + 1}</span>
          <span class="pad-icon">🎵</span>
          <span class="pad-name">${escHtml(pad.title)}</span>
+         <button class="pad-settings-btn" aria-label="패드 설정">⚙</button>
          <button class="pad-clear-btn">✕</button>`
       : `<span class="pad-num">${i + 1}</span>
          <span class="pad-icon" style="opacity:.25">+</span>
          <span class="pad-empty">비어있음</span>`;
 
+    let longPressTimer = null;
+    let pressStart = null;
     el.addEventListener('pointerdown', e => {
-      if (e.target.classList.contains('pad-clear-btn')) return;
+      if (e.target.classList.contains('pad-clear-btn') || e.target.classList.contains('pad-settings-btn')) return;
       if (e.button === 2) return; // right-click handled by contextmenu
       // 캡처: 손가락이 패드 밖으로 미끄러져도 pointerup을 이 패드가 받음 (홀드 정지 보장)
       try { el.setPointerCapture(e.pointerId); } catch {}
       triggerPad(i);
+      // 길게 누르면 설정 — 홀드 모드는 길게 누르는 것 자체가 연주라 제외 (⚙ 버튼으로 진입)
+      if (pads[i] && pads[i].padMode !== 'hold') {
+        pressStart = { x: e.clientX, y: e.clientY };
+        longPressTimer = setTimeout(() => openPadSettings(i), 600);
+      }
     });
-    const stopHold = () => {
+    el.addEventListener('pointermove', e => {
+      // 8px 이상 움직이면 길게누르기 취소 (손떨림·드래그 오인 방지)
+      if (pressStart && Math.hypot(e.clientX - pressStart.x, e.clientY - pressStart.y) > 8) {
+        clearTimeout(longPressTimer);
+        pressStart = null;
+      }
+    });
+    const endPress = () => {
+      clearTimeout(longPressTimer);
+      pressStart = null;
       if (pads[i]?.padMode === 'hold' && padSources[i]) {
         try { padSources[i].stop(); } catch {}
         padSources[i] = null;
       }
     };
-    el.addEventListener('pointerup', stopHold);
-    el.addEventListener('pointercancel', stopHold);
+    el.addEventListener('pointerup', endPress);
+    el.addEventListener('pointercancel', endPress);
     el.addEventListener('contextmenu', e => {
       e.preventDefault();
       if (pad) openPadSettings(i);
+    });
+    el.querySelector('.pad-settings-btn')?.addEventListener('click', e => {
+      e.stopPropagation();
+      openPadSettings(i);
     });
     el.querySelector('.pad-clear-btn')?.addEventListener('click', e => {
       e.stopPropagation();

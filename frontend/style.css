@@ -642,6 +642,20 @@ header h1 {
 .pad-clear-btn:hover { color: var(--red); }
 .pad-clear-btn:focus-visible { outline: 1px solid var(--red); }
 
+.pad-settings-btn {
+  position: absolute; top: 4px; left: 4px;
+  font-size: .68rem; padding: 2px 5px;
+  border-radius: 0; border: none;
+  background: rgba(0,0,0,.5);
+  color: rgba(255,255,255,.6); cursor: pointer;
+  display: none;
+  transition: color .1s;
+  line-height: 1;
+}
+.pad.assigned .pad-settings-btn { display: block; }
+.pad-settings-btn:hover { color: #4af; }
+.pad-settings-btn:focus-visible { outline: 1px solid #4af; }
+
 .sampler-hint {
   margin-top: 16px;
   color: var(--muted);
