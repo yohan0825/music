@@ -1201,6 +1201,8 @@ function assignToDeck(d, track) {
   disc.querySelector('.dan').textContent = track.title;
   updateDeckUI(d);
   d._waveformCache = null;
+  d._klCache = {};
+  d.keyLockBuffer = null;
   d.bpm = null;
   loadBuffer(track.id).then(buf => {
     d.buffer = buf;
@@ -2252,6 +2254,16 @@ function processKeyLock(d) {
   // 원속도(±1%)에서는 처리 자체를 안 함 — KL 켜기만 해도 소리가 변하지 않게
   if (Math.abs(d.baseRate - 1) < 0.01) { d.keyLockBuffer = null; return; }
 
+  // 같은 배속을 다시 쓰면(예: SYNC 토글) 재계산 없이 캐시 재사용
+  const cacheKey = d.baseRate.toFixed(3);
+  d._klCache = d._klCache || {};
+  if (d._klCache[cacheKey]) {
+    d.keyLockBuffer = d._klCache[cacheKey];
+    d.keyLockProcessing = false;
+    if (d.isPlaying) { snapshotDeckPos(d); d.targetRate = d.baseRate; startDeckSource(d); }
+    return;
+  }
+
   // 곡을 조각으로 나눠 CPU 코어 여러 개로 병렬 처리 (조각 경계는 크로스페이드로 봉합)
   const token = d._klToken = (d._klToken || 0) + 1; // 연속 변경 시 이전 작업 무효화
   d.keyLockProcessing = true;
@@ -2278,7 +2290,7 @@ function processKeyLock(d) {
 
   const results = new Array(nSeg);
   let doneCount = 0, nextJob = 0;
-  const maxWorkers = Math.min(4, navigator.hardwareConcurrency || 2, nSeg);
+  const maxWorkers = Math.min(8, navigator.hardwareConcurrency || 2, nSeg);
 
   function runNext() {
     if (nextJob >= jobs.length) return;
@@ -2327,6 +2339,10 @@ function processKeyLock(d) {
       }
     }
     d.keyLockBuffer = klBuf;
+    // 배속별 캐시 (메모리 관리: 최근 4개만 유지)
+    d._klCache[cacheKey] = klBuf;
+    const keys = Object.keys(d._klCache);
+    if (keys.length > 4) delete d._klCache[keys[0]];
     d.keyLockProcessing = false;
     setStatus(`덱 ${d.idx + 1} Key Lock 완료`, 'success');
     if (d.isPlaying) { snapshotDeckPos(d); d.targetRate = d.baseRate; startDeckSource(d); }
