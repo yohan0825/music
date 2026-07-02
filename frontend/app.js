@@ -941,6 +941,22 @@ renderPads();
 const NORM_DEG_PER_SEC = 198; // 33 RPM
 const MAX_SCRATCH_RATE = 4;
 
+// 스크래치 감도: 낮을수록 손가락 움직임 대비 오디오가 천천히 움직임 (기본 0.5)
+let scratchSens = parseFloat(localStorage.getItem('yc_scratch_sens')) || 0.5;
+{
+  const sensSlider = document.getElementById('scratch-sens');
+  const sensValEl  = document.getElementById('scratch-sens-val');
+  if (sensSlider) {
+    sensSlider.value = scratchSens;
+    sensValEl.textContent = scratchSens.toFixed(2) + 'x';
+    sensSlider.addEventListener('input', () => {
+      scratchSens = +sensSlider.value;
+      sensValEl.textContent = scratchSens.toFixed(2) + 'x';
+      localStorage.setItem('yc_scratch_sens', String(scratchSens));
+    });
+  }
+}
+
 function makeDeck(idx) {
   return {
     idx,
@@ -1214,7 +1230,7 @@ function setupDeckDrag(d) {
       disc.style.transform = `rotate(${d.visualAngle}deg)`;
       disc.querySelector('.vinyl-label').style.transform = `rotate(-${d.visualAngle}deg)`;
 
-      const rate = Math.max(-MAX_SCRATCH_RATE, Math.min(MAX_SCRATCH_RATE, angVel / NORM_DEG_PER_SEC));
+      const rate = Math.max(-MAX_SCRATCH_RATE, Math.min(MAX_SCRATCH_RATE, angVel / NORM_DEG_PER_SEC * scratchSens));
       const absRate = Math.abs(rate);
       const reversed = rate < 0;
 

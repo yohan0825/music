@@ -1069,6 +1069,41 @@ header { position: relative; }
 .deck-disc:active { cursor: grabbing; }
 .deck-disc.assigned { border-color: var(--muted2); }
 
+/* 회전 인식용 마커: 중심→가장자리 밝은 선 (디스크와 함께 돌아감) */
+.deck-disc::before {
+  content: '';
+  position: absolute;
+  top: 5%;
+  left: 50%;
+  width: 3px;
+  height: 42%;
+  margin-left: -1.5px;
+  background: linear-gradient(rgba(255,255,255,.75), rgba(255,255,255,0));
+  pointer-events: none;
+  z-index: 0;
+}
+
+.scratch-sens-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+.sens-label {
+  font-size: .62rem;
+  color: var(--muted);
+  letter-spacing: .08em;
+  font-family: "Courier New", monospace;
+}
+.scratch-sens-bar input[type=range] { width: 140px; accent-color: #4af; cursor: pointer; }
+#scratch-sens-val {
+  font-size: .66rem;
+  color: #4af;
+  font-family: "Courier New", monospace;
+  min-width: 42px;
+}
+
 .vinyl-label {
   width: 80px;
   height: 80px;
