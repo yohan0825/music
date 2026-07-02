@@ -216,16 +216,56 @@ async function refreshTracks() {
   } catch {}
 }
 
+const queueSection = document.getElementById('queue-section');
+const queueListEl  = document.getElementById('queue-list');
+const QUEUE_STATUS_LABEL = { pending: '대기', processing: '처리 중', error: '실패' };
+
+function renderQueue(queue) {
+  queueSection.style.display = queue.length ? '' : 'none';
+  queueListEl.innerHTML = '';
+  queue.forEach(q => {
+    const li = document.createElement('li');
+    li.className = `queue-item q-${q.status}`;
+    const name = q.title || q.url;
+    const errTip = q.error ? ` title="${escHtml(q.error)}"` : '';
+    const btns = [];
+    if (q.status === 'pending') {
+      btns.push('<button class="btn-ghost" data-act="up" aria-label="위로">▲</button>');
+      btns.push('<button class="btn-ghost" data-act="down" aria-label="아래로">▼</button>');
+    }
+    if (q.status === 'error') {
+      btns.push('<button class="btn-ghost" data-act="retry" aria-label="재시도">↻</button>');
+    }
+    btns.push('<button class="btn-danger" data-act="del" aria-label="취소">✕</button>');
+    li.innerHTML = `
+      <span class="queue-status"${errTip}>${QUEUE_STATUS_LABEL[q.status] || q.status}</span>
+      <span class="queue-title" title="${escHtml(q.url)}">${escHtml(name)}</span>
+      <span class="queue-actions">${btns.join('')}</span>`;
+    li.addEventListener('click', async e => {
+      const act = e.target.dataset.act;
+      if (!act) return;
+      try {
+        if (act === 'up' || act === 'down') await fetch(`/api/queue/${q.id}/move?dir=${act}`, { method: 'POST' });
+        else if (act === 'retry') await fetch(`/api/queue/${q.id}/retry`, { method: 'POST' });
+        else if (act === 'del') await fetch(`/api/queue/${q.id}`, { method: 'DELETE' });
+      } catch {}
+      startQueuePolling();
+      pollQueueTick();
+    });
+    queueListEl.appendChild(li);
+  });
+}
+
 async function pollQueueTick() {
   await refreshTracks();
   let queue = [];
   try { queue = await (await fetch('/api/queue')).json(); } catch {}
+  renderQueue(queue);
   const active = queue.filter(q => q.status === 'pending' || q.status === 'processing');
-  const failed = queue.filter(q => q.status === 'error');
   if (active.length) {
     setStatus(`대기 중 ${active.length}곡 — 집 PC가 처리 중이에요 ⏳`);
   } else {
-    if (failed.length) setStatus(`추출 실패 ${failed.length}곡 (집 PC가 꺼져있거나 링크 오류)`, 'error');
+    setStatus('');
     stopQueuePolling();
   }
 }
@@ -287,11 +327,8 @@ uploadDrop.addEventListener('drop', e => {
 (async () => {
   await refreshTracks();
   restoreProject();
-  // 이전에 넣어둔 대기열이 남아있으면 폴링 재개
-  try {
-    const queue = await (await fetch('/api/queue')).json();
-    if (queue.some(q => q.status === 'pending' || q.status === 'processing')) startQueuePolling();
-  } catch {}
+  // 대기열 렌더 + 남은 작업 있으면 폴링 재개 (없으면 한 번 그리고 알아서 멈춤)
+  startQueuePolling();
 })();
 
 // ─────────────────────────────────────────────

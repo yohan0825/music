@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>뮤직믹서</title>
-<link rel="stylesheet" href="style.css?v=2" />
+<link rel="stylesheet" href="style.css?v=4" />
 </head>
 <body>
   <div class="app">
@@ -37,6 +37,10 @@
           <button type="submit" id="extract-btn">추출하기</button>
         </form>
         <p id="status" class="status" role="status" aria-live="polite"></p>
+      </section>
+      <section class="queue-section" id="queue-section" style="display:none">
+        <p class="section-label">추출 대기열</p>
+        <ul id="queue-list" class="queue-list" aria-label="추출 대기열"></ul>
       </section>
       <section class="upload-box">
         <label class="extract-label">파일 업로드 (MP3/WAV 등)</label>
@@ -351,6 +355,6 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js"></script>
-  <script src="app.js?v=3"></script>
+  <script src="app.js?v=4"></script>
 </body>
 </html>

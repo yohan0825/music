@@ -12,6 +12,7 @@ import time
 import uuid
 from pathlib import Path
 
+import httpx
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -86,6 +87,25 @@ class ExtractRequest(BaseModel):
     url: str
 
 
+def _fetch_title_async(qid: str, url: str):
+    """oEmbed로 영상 제목을 가져와 큐에 채운다 (봇 감지 없어 클라우드에서도 됨)."""
+    def run():
+        try:
+            with httpx.Client(timeout=8, follow_redirects=True) as client:
+                r = client.get("https://www.youtube.com/oembed",
+                               params={"url": url, "format": "json"})
+                title = r.json().get("title")
+            if title:
+                with _lock:
+                    q = QUEUE.get(qid)
+                    if q:
+                        q["title"] = title
+                        _save_queue()
+        except Exception:
+            pass  # 제목은 부가 정보 — 실패해도 링크로 표시됨
+    threading.Thread(target=run, daemon=True).start()
+
+
 @app.post("/api/extract")
 def enqueue_extract(req: ExtractRequest):
     """유튜브 링크를 추출 큐에 넣는다 (실제 추출은 집 PC 워커가 함)."""
@@ -97,6 +117,7 @@ def enqueue_extract(req: ExtractRequest):
     with _lock:
         QUEUE[qid] = {"id": qid, "url": url, "status": "pending", "title": None, "error": None}
         _save_queue()
+    _fetch_title_async(qid, url)
 
     return {"queued": True, "queue_id": qid,
             "message": "추출 대기열에 추가됐어요. 집 PC가 켜져 있으면 곧 라이브러리에 나타나요."}
@@ -143,8 +164,43 @@ def fail_queue(qid: str, token: str = Query(""), error: str = Form("")):
 
 @app.delete("/api/queue/{qid}")
 def remove_queue(qid: str):
+    """대기열 취소. 처리 중이던 작업도 취소되면 업로드가 거부된다(410)."""
     with _lock:
         QUEUE.pop(qid, None)
+        _save_queue()
+    return {"ok": True}
+
+
+@app.post("/api/queue/{qid}/move")
+def move_queue(qid: str, dir: str = Query(...)):
+    """대기열 순서를 한 칸 위/아래로 옮긴다."""
+    if dir not in ("up", "down"):
+        raise HTTPException(status_code=400, detail="dir은 up 또는 down이어야 합니다.")
+    with _lock:
+        keys = list(QUEUE.keys())
+        if qid not in keys:
+            raise HTTPException(status_code=404, detail="대기열에 없습니다.")
+        i = keys.index(qid)
+        j = i - 1 if dir == "up" else i + 1
+        if 0 <= j < len(keys):
+            keys[i], keys[j] = keys[j], keys[i]
+            reordered = {k: QUEUE[k] for k in keys}
+            QUEUE.clear()
+            QUEUE.update(reordered)
+            _save_queue()
+    return {"ok": True}
+
+
+@app.post("/api/queue/{qid}/retry")
+def retry_queue(qid: str):
+    """실패한 작업을 다시 대기 상태로 되돌린다."""
+    with _lock:
+        q = QUEUE.get(qid)
+        if not q:
+            raise HTTPException(status_code=404, detail="대기열에 없습니다.")
+        q["status"] = "pending"
+        q["error"] = None
+        q.pop("claimed_at", None)
         _save_queue()
     return {"ok": True}
 
@@ -173,6 +229,10 @@ async def upload_audio(
     # 워커가 올리는 경우(queue_id 있음)만 토큰 검사
     if queue_id:
         _check_token(token)
+        # 사용자가 처리 중에 취소한 작업이면 결과를 버린다
+        with _lock:
+            if queue_id not in QUEUE:
+                raise HTTPException(status_code=410, detail="취소된 작업입니다.")
 
     # duration은 없을 수 있음(라이브 영상 등) — 파싱 실패해도 업로드는 진행
     try:

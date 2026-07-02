@@ -98,6 +98,9 @@ def process(job: dict):
                           "queue_id": qid, "token": WORKER_TOKEN},
                     timeout=180,
                 )
+            if r.status_code == 410:
+                print(f"[취소됨] 사용자가 대기열에서 취소함: {title}")
+                return
             r.raise_for_status()
         except Exception as e:
             print(f"[업로드 실패] {e}")
