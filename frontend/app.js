@@ -1038,18 +1038,37 @@ function pauseDeck(d) {
   updateDeckUI(d);
 }
 
+function deckEls(d) {
+  // 덱 DOM은 정적이므로 한 번만 조회해서 캐싱 (매 프레임 querySelector 방지)
+  if (!d._ui) {
+    const container = document.querySelector(`.deck[data-deck="${d.idx}"]`);
+    if (!container) return null;
+    d._ui = {
+      title:   container.querySelector('.deck-title-text'),
+      pos:     container.querySelector('.deck-pos-text'),
+      play:    container.querySelector('.deck-play-btn'),
+      bpm:     container.querySelector('.deck-bpm-text'),
+      loop:    container.querySelector('.loop-toggle'),
+      cues:    [...container.querySelectorAll('.hotcue-btn')],
+      disc:    document.querySelector(`.deck-disc[data-deck="${d.idx}"]`),
+      vinyl:   null,
+      canvas:  document.querySelector(`.deck-waveform[data-deck="${d.idx}"]`),
+    };
+    d._ui.vinyl = d._ui.disc?.querySelector('.vinyl-label');
+  }
+  return d._ui;
+}
+
 function updateDeckUI(d) {
-  const container = document.querySelector(`.deck[data-deck="${d.idx}"]`);
-  if (!container) return;
-  container.querySelector('.deck-title-text').textContent = d.track ? d.track.title : '-';
+  const ui = deckEls(d);
+  if (!ui) return;
+  ui.title.textContent = d.track ? d.track.title : '-';
   const pos = getDeckPos(d);
-  container.querySelector('.deck-pos-text').textContent = `${fmtTime(pos)} / ${fmtTime(d.duration)}`;
-  container.querySelector('.deck-play-btn').textContent = d.isPlaying ? '⏸' : '▶';
-  const bpmEl = container.querySelector('.deck-bpm-text');
-  if (bpmEl) bpmEl.textContent = d.bpm ? `${d.bpm} BPM` : '-- BPM';
-  const loopBtn = container.querySelector('.loop-toggle');
-  if (loopBtn) loopBtn.classList.toggle('active', d.loopActive);
-  container.querySelectorAll('.hotcue-btn').forEach((btn, i) => {
+  ui.pos.textContent = `${fmtTime(pos)} / ${fmtTime(d.duration)}`;
+  ui.play.textContent = d.isPlaying ? '⏸' : '▶';
+  if (ui.bpm) ui.bpm.textContent = d.bpm ? `${d.bpm} BPM` : '-- BPM';
+  if (ui.loop) ui.loop.classList.toggle('active', d.loopActive);
+  ui.cues.forEach((btn, i) => {
     btn.classList.toggle('set', d.hotCues[i] !== null);
     btn.title = d.hotCues[i] !== null ? `${fmtTime(d.hotCues[i])} — 길게 눌러 삭제` : '현재 위치에 큐 설정';
   });
@@ -1237,12 +1256,12 @@ let prevDeckRaf = null;
   prevDeckRaf = ts;
   for (const d of decks) {
     if (!d.isPlaying || d.isDragging) continue;
-    const disc = document.querySelector(`.deck-disc[data-deck="${d.idx}"]`);
-    if (!disc) continue;
+    const ui = deckEls(d);
+    if (!ui?.disc) continue;
     const dir = d.isReversed ? -1 : 1;
     d.visualAngle = (d.visualAngle + dir * NORM_DEG_PER_SEC * Math.abs(d.targetRate || 1) * dt + 360) % 360;
-    disc.style.transform = `rotate(${d.visualAngle}deg)`;
-    disc.querySelector('.vinyl-label').style.transform = `rotate(-${d.visualAngle}deg)`;
+    ui.disc.style.transform = `rotate(${d.visualAngle}deg)`;
+    ui.vinyl.style.transform = `rotate(-${d.visualAngle}deg)`;
     updateDeckUI(d);
     drawWaveform(d);
   }
@@ -1257,7 +1276,7 @@ decks.forEach(d => setupDeckDrag(d));
 const HOT_CUE_COLORS = ['#4af', '#f4a', '#af4', '#fa4'];
 
 function buildWaveformCache(d) {
-  const canvas = document.querySelector(`.deck-waveform[data-deck="${d.idx}"]`);
+  const canvas = deckEls(d)?.canvas;
   if (!canvas || !d.buffer) return;
   canvas.width = canvas.offsetWidth || 400;
   const W = canvas.width, H = canvas.height;
@@ -1282,7 +1301,7 @@ function buildWaveformCache(d) {
 }
 
 function drawWaveform(d) {
-  const canvas = document.querySelector(`.deck-waveform[data-deck="${d.idx}"]`);
+  const canvas = deckEls(d)?.canvas;
   if (!canvas) return;
   const ctx2d = canvas.getContext('2d');
   const W = canvas.width, H = canvas.height;
@@ -1333,11 +1352,14 @@ function estimateBpm(buf) {
   }
   const wLen = 20;
   const onsets = [];
+  let winSum = 0;
+  for (let i = 0; i < wLen && i < energies.length; i++) winSum += energies[i];
   for (let i = wLen; i < energies.length - 1; i++) {
-    const mean = energies.slice(i - wLen, i).reduce((a, b) => a + b) / wLen;
+    const mean = winSum / wLen;
     if (energies[i] > mean * 1.4 && energies[i] > energies[i - 1] && energies[i] >= energies[i + 1]) {
       if (!onsets.length || (i - onsets[onsets.length - 1]) * hop / sr > 0.1) onsets.push(i);
     }
+    winSum += energies[i] - energies[i - wLen];
   }
   if (onsets.length < 4) return null;
   const hist = {};
@@ -1844,11 +1866,16 @@ document.getElementById('master-vol').addEventListener('input', e => {
 const vuCanvas = document.getElementById('vu-canvas');
 const specCanvas = document.getElementById('spectrum-canvas');
 
+let meterBufs = null; // 프레임마다 재할당하지 않도록 재사용
+
 (function animMeters() {
   if (masterAnalyser) {
     const bufLen = masterAnalyser.frequencyBinCount;
-    const timeData = new Uint8Array(bufLen);
-    const freqData = new Uint8Array(bufLen);
+    if (!meterBufs || meterBufs.time.length !== bufLen) {
+      meterBufs = { time: new Uint8Array(bufLen), freq: new Uint8Array(bufLen) };
+    }
+    const timeData = meterBufs.time;
+    const freqData = meterBufs.freq;
     masterAnalyser.getByteTimeDomainData(timeData);
     masterAnalyser.getByteFrequencyData(freqData);
 
@@ -1920,7 +1947,7 @@ document.getElementById('mixer-mp3').addEventListener('click', async () => {
     const left = rendered.getChannelData(0);
     const right = rendered.numberOfChannels > 1 ? rendered.getChannelData(1) : left;
     const l16 = floatTo16Bit(left), r16 = floatTo16Bit(right);
-    const enc = new lamejs.Mp3Encoder(2, sr, 192);
+    const enc = new lamejs.Mp3Encoder(2, rendered.sampleRate, 192);
     const BLOCK = 1152;
     const chunks = [];
     for (let i = 0; i < l16.length; i += BLOCK) {
@@ -2153,8 +2180,6 @@ function renderAutomation(mt) {
   });
 }
 
-// Re-render automation overlays after blocks are ready
-const _origRenderMixerTrack = renderMixerTrack;
 // Automation is rendered lazily when tab is opened
 document.querySelector('[data-tab="mixer"]').addEventListener('click', () => {
   setTimeout(() => mixerTracks.forEach(mt => renderAutomation(mt)), 50);
@@ -2171,7 +2196,6 @@ async function setupMidi() {
     const midi = await navigator.requestMIDIAccess();
     const connect = port => { port.onmidimessage = handleMidi; };
     midi.inputs.forEach(connect);
-    midi.onstatechange = e => { if (e.port.type === 'input' && e.port.state === 'connected') connect(e.port); };
     const count = midi.inputs.size;
     if (count > 0) { midiIndicator.textContent = `MIDI ● (${count})`; midiIndicator.classList.add('active'); }
     else midiIndicator.textContent = 'MIDI ○';

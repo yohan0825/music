@@ -8,6 +8,7 @@ import json
 import os
 import re
 import threading
+import time
 import uuid
 from pathlib import Path
 
@@ -107,14 +108,21 @@ def list_queue():
     return [q for q in QUEUE.values() if q["status"] in ("pending", "processing", "error")]
 
 
+# processing 상태로 이 시간(초) 넘게 방치된 작업은 워커가 죽은 것으로 보고 재시도
+STALE_CLAIM_SEC = 600
+
+
 @app.get("/api/queue/next")
 def claim_next(token: str = Query("")):
     """워커가 다음 작업을 가져간다. 없으면 빈 응답."""
     _check_token(token)
+    now = time.time()
     with _lock:
         for q in QUEUE.values():
-            if q["status"] == "pending":
+            stale = q["status"] == "processing" and now - q.get("claimed_at", 0) > STALE_CLAIM_SEC
+            if q["status"] == "pending" or stale:
                 q["status"] = "processing"
+                q["claimed_at"] = now
                 _save_queue()
                 return {"queue_id": q["id"], "url": q["url"]}
     return {}
@@ -157,7 +165,7 @@ def _register_track(track_id: str, title: str, duration, filename: str):
 async def upload_audio(
     file: UploadFile = File(...),
     title: str = Form(""),
-    duration: float | None = Form(None),
+    duration: str = Form(""),
     queue_id: str = Form(""),
     token: str = Form(""),
 ):
@@ -165,6 +173,12 @@ async def upload_audio(
     # 워커가 올리는 경우(queue_id 있음)만 토큰 검사
     if queue_id:
         _check_token(token)
+
+    # duration은 없을 수 있음(라이브 영상 등) — 파싱 실패해도 업로드는 진행
+    try:
+        parsed_duration = float(duration) if duration.strip() else None
+    except ValueError:
+        parsed_duration = None
 
     ext = Path(file.filename).suffix.lower()
     if ext not in {".mp3", ".wav", ".ogg", ".m4a", ".flac", ".aac"}:
@@ -176,7 +190,7 @@ async def upload_audio(
     dest.write_bytes(content)
 
     resolved_title = title.strip() or Path(file.filename).stem
-    result = _register_track(track_id, resolved_title, duration, dest.name)
+    result = _register_track(track_id, resolved_title, parsed_duration, dest.name)
 
     if queue_id:
         with _lock:

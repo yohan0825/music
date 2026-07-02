@@ -70,6 +70,14 @@ def extract(url: str, out_dir: Path) -> tuple[Path, str, float | None]:
     return mp3, info.get("title", "Untitled"), info.get("duration")
 
 
+def _report_fail(qid: str, error: str):
+    try:
+        httpx.post(f"{RAILWAY_URL}/api/queue/{qid}/fail",
+                   params={"token": WORKER_TOKEN}, data={"error": error}, timeout=30)
+    except Exception:
+        pass
+
+
 def process(job: dict):
     qid, url = job["queue_id"], job["url"]
     print(f"[추출] {url}")
@@ -77,21 +85,24 @@ def process(job: dict):
         try:
             mp3, title, duration = extract(url, Path(tmp))
         except Exception as e:
-            print(f"[실패] {e}")
-            try:
-                httpx.post(f"{RAILWAY_URL}/api/queue/{qid}/fail",
-                           params={"token": WORKER_TOKEN}, data={"error": str(e)}, timeout=30)
-            except Exception:
-                pass
+            print(f"[추출 실패] {e}")
+            _report_fail(qid, f"추출 실패: {e}")
             return
 
-        with open(mp3, "rb") as f:
-            httpx.post(
-                f"{RAILWAY_URL}/api/upload",
-                files={"file": (f"{title}.mp3", f, "audio/mpeg")},
-                data={"title": title, "duration": duration or "", "queue_id": qid, "token": WORKER_TOKEN},
-                timeout=180,
-            )
+        try:
+            with open(mp3, "rb") as f:
+                r = httpx.post(
+                    f"{RAILWAY_URL}/api/upload",
+                    files={"file": (f"{title}.mp3", f, "audio/mpeg")},
+                    data={"title": title, "duration": str(duration) if duration else "",
+                          "queue_id": qid, "token": WORKER_TOKEN},
+                    timeout=180,
+                )
+            r.raise_for_status()
+        except Exception as e:
+            print(f"[업로드 실패] {e}")
+            _report_fail(qid, f"업로드 실패: {e}")
+            return
     print(f"[완료] {title}")
 
 
