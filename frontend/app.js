@@ -98,6 +98,22 @@ function fmtTime(sec) {
   return `${m}:${s}`;
 }
 
+// 포인터 드래그 추적: pointerdown 이후 같은 포인터(손가락/마우스)의 move를 따라가고
+// up/cancel에서 정리한다. pointerId 필터라 멀티터치(양쪽 덱 동시 스크래치)도 안전.
+function trackPointer(e, onMove, onUp) {
+  const move = ev => { if (ev.pointerId === e.pointerId) onMove(ev); };
+  const finish = ev => {
+    if (ev.pointerId !== e.pointerId) return;
+    document.removeEventListener('pointermove', move);
+    document.removeEventListener('pointerup', finish);
+    document.removeEventListener('pointercancel', finish);
+    onUp(ev);
+  };
+  document.addEventListener('pointermove', move);
+  document.addEventListener('pointerup', finish);
+  document.addEventListener('pointercancel', finish);
+}
+
 // ─────────────────────────────────────────────
 // Tabs
 // ─────────────────────────────────────────────
@@ -513,14 +529,15 @@ function removeMixerTrack(mt) {
 // Block drag to reposition
 // ─────────────────────────────────────────────
 function setupBlockDrag(block, mt) {
-  block.addEventListener('mousedown', e => {
+  block.addEventListener('pointerdown', e => {
     if (e.target.classList.contains('trim-handle')) return;
+    if (e.button === 2) return;
     e.preventDefault();
     pushUndo();
     const startX = e.clientX;
     const origOffset = mt.startOffset;
-    const onMove = e => {
-      let t = Math.max(0, origOffset + (e.clientX - startX) / PPS);
+    trackPointer(e, ev => {
+      let t = Math.max(0, origOffset + (ev.clientX - startX) / PPS);
       if (snapEnabled) {
         const bpm = parseFloat(document.getElementById('mixer-bpm')?.value) || 120;
         const beat = 60 / bpm;
@@ -528,16 +545,11 @@ function setupBlockDrag(block, mt) {
       }
       mt.startOffset = t;
       updateBlockGeometry(mt);
-    };
-    const onUp = () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
+    }, () => {
       buildRuler();
       updateMixerTimeDisplay();
       scheduleSave();
-    };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
+    });
   });
 }
 
@@ -545,29 +557,25 @@ function setupBlockDrag(block, mt) {
 // Trim handles
 // ─────────────────────────────────────────────
 function setupTrimHandle(handle, mt, side, block) {
-  handle.addEventListener('mousedown', e => {
+  handle.addEventListener('pointerdown', e => {
+    if (e.button === 2) return;
     e.preventDefault();
     e.stopPropagation();
     const startX  = e.clientX;
     const origVal = side === 'left' ? mt.trimStart : mt.trimEnd;
-    const onMove = e => {
-      const delta = (e.clientX - startX) / PPS;
+    trackPointer(e, ev => {
+      const delta = (ev.clientX - startX) / PPS;
       if (side === 'left') {
         mt.trimStart = Math.max(0, Math.min(origVal + delta, mt.trimEnd - 0.5));
       } else {
         mt.trimEnd = Math.max(mt.trimStart + 0.5, Math.min(origVal + delta, mt.duration));
       }
       updateBlockGeometry(mt, block);
-      // defer ruler rebuild to mouseup
-    };
-    const onUp = () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
+      // 눈금 재계산은 드래그 끝에서만
+    }, () => {
       buildRuler();
       updateMixerTimeDisplay();
-    };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
+    });
   });
 }
 
@@ -801,17 +809,21 @@ function renderPads() {
          <span class="pad-icon" style="opacity:.25">+</span>
          <span class="pad-empty">비어있음</span>`;
 
-    el.addEventListener('mousedown', e => {
+    el.addEventListener('pointerdown', e => {
       if (e.target.classList.contains('pad-clear-btn')) return;
       if (e.button === 2) return; // right-click handled by contextmenu
+      // 캡처: 손가락이 패드 밖으로 미끄러져도 pointerup을 이 패드가 받음 (홀드 정지 보장)
+      try { el.setPointerCapture(e.pointerId); } catch {}
       triggerPad(i);
     });
-    el.addEventListener('mouseup', e => {
-      if (pad?.padMode === 'hold' && padSources[i]) {
+    const stopHold = () => {
+      if (pads[i]?.padMode === 'hold' && padSources[i]) {
         try { padSources[i].stop(); } catch {}
         padSources[i] = null;
       }
-    });
+    };
+    el.addEventListener('pointerup', stopHold);
+    el.addEventListener('pointercancel', stopHold);
     el.addEventListener('contextmenu', e => {
       e.preventDefault();
       if (pad) openPadSettings(i);
@@ -1141,9 +1153,10 @@ function setupDeckDrag(d) {
   const badge = disc.querySelector('.deck-speed-badge');
   let prevAngle = 0, prevTime = 0;
 
-  disc.addEventListener('mousedown', e => {
+  disc.addEventListener('pointerdown', e => {
     if (e.target.closest('.deck-assign-btn')) return;
     if (!d.buffer) return;
+    if (e.button === 2) return;
     e.preventDefault();
     const rect = disc.getBoundingClientRect();
     const cx = rect.left + rect.width / 2;
@@ -1201,8 +1214,6 @@ function setupDeckDrag(d) {
     };
 
     const onUp = () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
       d.isDragging = false;
       disc.classList.remove('dragging');
       snapshotDeckPos(d);
@@ -1216,8 +1227,7 @@ function setupDeckDrag(d) {
       updateDeckUI(d);
     };
 
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
+    trackPointer(e, onMove, onUp);
   });
 }
 
@@ -1503,16 +1513,25 @@ document.querySelectorAll('.loop-btn').forEach(btn => {
 // ─────────────────────────────────────────────
 document.querySelectorAll('.hotcue-btn').forEach(btn => {
   let pressTimer = null;
-  btn.addEventListener('mousedown', () => {
+  let longPressFired = false;
+  btn.addEventListener('pointerdown', e => {
+    if (e.button === 2) return;
+    longPressFired = false;
     pressTimer = setTimeout(() => {
+      longPressFired = true;
       const d = decks[+btn.dataset.deck];
       d.hotCues[+btn.dataset.cue] = null;
       updateDeckUI(d);
       drawWaveform(d);
     }, 600);
   });
-  btn.addEventListener('mouseup', () => clearTimeout(pressTimer));
+  const cancelPress = () => clearTimeout(pressTimer);
+  btn.addEventListener('pointerup', cancelPress);
+  btn.addEventListener('pointercancel', cancelPress);
+  btn.addEventListener('pointerleave', cancelPress);
   btn.addEventListener('click', () => {
+    // 길게 눌러 삭제한 직후의 click이 큐를 곧바로 재설정하지 않도록
+    if (longPressFired) { longPressFired = false; return; }
     const d = decks[+btn.dataset.deck];
     const ci = +btn.dataset.cue;
     if (d.hotCues[ci] === null) {
