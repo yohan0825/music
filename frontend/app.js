@@ -1161,7 +1161,8 @@ function updateDeckUI(d) {
   const pos = getDeckPos(d);
   ui.pos.textContent = `${fmtTime(pos)} / ${fmtTime(d.duration)}`;
   ui.play.textContent = d.isPlaying ? '⏸' : '▶';
-  if (ui.bpm) ui.bpm.textContent = d.bpm ? `${d.bpm} BPM` : '-- BPM';
+  // 배속 반영한 실제 BPM 표시 (SYNC·피치 변경이 숫자에도 보이게)
+  if (ui.bpm) ui.bpm.textContent = d.bpm ? `${Math.round(d.bpm * d.baseRate)} BPM` : '-- BPM';
   if (ui.loop) ui.loop.classList.toggle('active', d.loopActive);
   ui.cues.forEach((btn, i) => {
     btn.classList.toggle('set', d.hotCues[i] !== null);
@@ -1307,6 +1308,7 @@ document.querySelectorAll('.deck-pitch-slider').forEach(slider => {
       d.isReversed = false;
       startDeckSource(d);
     }
+    updateDeckUI(d); // 정지 상태에서도 BPM 숫자 갱신
   });
   slider.addEventListener('change', () => {
     const d = decks[+slider.dataset.deck];
