@@ -807,6 +807,7 @@ header {
   display: block;
   cursor: crosshair;
   border: 1px solid var(--border2);
+  touch-action: none; /* 파형 드래그 시크가 스크롤로 새지 않게 */
 }
 
 /* ── BPM row ── */

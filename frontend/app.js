@@ -1384,6 +1384,38 @@ let prevDeckRaf = null;
 decks.forEach(d => setupDeckDrag(d));
 
 // ─────────────────────────────────────────────
+// 파형 탭/드래그로 시크
+// ─────────────────────────────────────────────
+document.querySelectorAll('.deck-waveform').forEach(cv => {
+  cv.addEventListener('pointerdown', e => {
+    const d = decks[+cv.dataset.deck];
+    if (!d || !d.buffer) return;
+    if (e.button === 2) return;
+    e.preventDefault();
+    const wasPlaying = d.isPlaying;
+    if (wasPlaying) { snapshotDeckPos(d); stopDeckSource(d); d.isPlaying = false; }
+    const seekTo = ev => {
+      const rect = cv.getBoundingClientRect();
+      const frac = Math.min(1, Math.max(0, (ev.clientX - rect.left) / rect.width));
+      d.position = frac * d.duration;
+      d.startPos = d.position;
+      updateDeckUI(d);
+      drawWaveform(d);
+    };
+    seekTo(e);
+    trackPointer(e, seekTo, () => {
+      if (wasPlaying) {
+        d.isPlaying = true;
+        d.targetRate = d.baseRate;
+        d.isReversed = false;
+        startDeckSource(d);
+      }
+      updateDeckUI(d);
+    });
+  });
+});
+
+// ─────────────────────────────────────────────
 // Waveform
 // ─────────────────────────────────────────────
 const HOT_CUE_COLORS = ['#4af', '#f4a', '#af4', '#fa4'];
