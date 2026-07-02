@@ -108,6 +108,22 @@ function fmtTime(sec) {
   return `${m}:${s}`;
 }
 
+// 터치 동시 탭 지원: iOS는 click을 첫 번째 손가락에만 합성해줘서
+// 두 번째 손가락 탭(양쪽 재생 동시 누르기 등)이 무시된다 → pointerup으로 직접 처리.
+// 마우스/키보드는 기존 click 경로 유지 (접근성).
+function onTap(el, handler) {
+  let touchHandledAt = 0;
+  el.addEventListener('pointerup', e => {
+    if (e.pointerType === 'mouse' || e.button === 2) return;
+    touchHandledAt = Date.now();
+    handler(e);
+  });
+  el.addEventListener('click', e => {
+    if (Date.now() - touchHandledAt < 500) return; // 터치 직후 합성 click 중복 방지
+    handler(e);
+  });
+}
+
 // 포인터 드래그 추적: pointerdown 이후 같은 포인터(손가락/마우스)의 move를 따라가고
 // up/cancel에서 정리한다. pointerId 필터라 멀티터치(양쪽 덱 동시 스크래치)도 안전.
 function trackPointer(e, onMove, onUp) {
@@ -1288,7 +1304,7 @@ document.querySelectorAll('.vol-vertical').forEach(slider => {
 });
 
 document.querySelectorAll('.deck-play-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
+  onTap(btn, () => {
     const d = decks[+btn.dataset.deck];
     if (!d) return;
     if (d.isPlaying) pauseDeck(d); else playDeck(d);
@@ -1535,7 +1551,7 @@ document.getElementById('crossfader').addEventListener('input', e => updateCross
 // Loop controls
 // ─────────────────────────────────────────────
 document.querySelectorAll('.loop-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
+  onTap(btn, () => {
     const d = decks[+btn.dataset.deck];
     const action = btn.dataset.action;
     if (action === 'in') {
@@ -1579,8 +1595,8 @@ document.querySelectorAll('.hotcue-btn').forEach(btn => {
   btn.addEventListener('pointerup', cancelPress);
   btn.addEventListener('pointercancel', cancelPress);
   btn.addEventListener('pointerleave', cancelPress);
-  btn.addEventListener('click', () => {
-    // 길게 눌러 삭제한 직후의 click이 큐를 곧바로 재설정하지 않도록
+  onTap(btn, () => {
+    // 길게 눌러 삭제한 직후의 탭이 큐를 곧바로 재설정하지 않도록
     if (longPressFired) { longPressFired = false; return; }
     const d = decks[+btn.dataset.deck];
     const ci = +btn.dataset.cue;
@@ -1600,7 +1616,7 @@ document.querySelectorAll('.hotcue-btn').forEach(btn => {
 // BPM Sync
 // ─────────────────────────────────────────────
 document.querySelectorAll('.deck-sync-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
+  onTap(btn, () => {
     const idx = +btn.dataset.deck;
     const d = decks[idx];
     const other = decks[1 - idx];
@@ -2286,7 +2302,7 @@ function processKeyLock(d) {
 }
 
 document.querySelectorAll('.deck-kl-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
+  onTap(btn, () => {
     const d = decks[+btn.dataset.deck];
     if (!d) return;
     d.keyLockEnabled = !d.keyLockEnabled;
