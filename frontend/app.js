@@ -2203,24 +2203,86 @@ function processKeyLock(d) {
   if (!d.buffer || !d.keyLockEnabled) { d.keyLockBuffer = null; return; }
   // 원속도(±1%)에서는 처리 자체를 안 함 — KL 켜기만 해도 소리가 변하지 않게
   if (Math.abs(d.baseRate - 1) < 0.01) { d.keyLockBuffer = null; return; }
+
+  // 곡을 조각으로 나눠 CPU 코어 여러 개로 병렬 처리 (조각 경계는 크로스페이드로 봉합)
+  const token = d._klToken = (d._klToken || 0) + 1; // 연속 변경 시 이전 작업 무효화
   d.keyLockProcessing = true;
   setStatus(`덱 ${d.idx + 1} Key Lock 처리 중…`, 'info');
-  const worker = new Worker(klWorkerUrl);
-  const channels = [];
-  for (let c = 0; c < d.buffer.numberOfChannels; c++)
-    channels.push(d.buffer.getChannelData(c).slice());
-  worker.onmessage = ({data: {result}}) => {
+
+  const buf = d.buffer;
+  const rate = d.baseRate;
+  const n = buf.length, sr = buf.sampleRate, nCh = buf.numberOfChannels;
+  const SEG = sr * 20;                    // 조각 길이 20초
+  const MARGIN = Math.round(sr * 0.5);    // 경계 여유분
+  const XF = 2048;                        // 경계 크로스페이드 길이
+  const nSeg = Math.max(1, Math.ceil(n / SEG));
+
+  const jobs = [];
+  for (let k = 0; k < nSeg; k++) {
+    const inStart = k * SEG;
+    const inEnd = Math.min(n, inStart + SEG);
+    jobs.push({
+      k, inStart, inEnd,
+      procStart: Math.max(0, inStart - MARGIN),
+      procEnd: Math.min(n, inEnd + MARGIN),
+    });
+  }
+
+  const results = new Array(nSeg);
+  let doneCount = 0, nextJob = 0;
+  const maxWorkers = Math.min(4, navigator.hardwareConcurrency || 2, nSeg);
+
+  function runNext() {
+    if (nextJob >= jobs.length) return;
+    const job = jobs[nextJob++];
+    const worker = new Worker(klWorkerUrl);
+    const channels = [];
+    for (let c = 0; c < nCh; c++)
+      channels.push(buf.getChannelData(c).slice(job.procStart, job.procEnd));
+    worker.onmessage = ({ data: { result } }) => {
+      worker.terminate();
+      if (token !== d._klToken) return; // 더 최근 요청이 있으면 결과 버림
+      results[job.k] = { job, chans: result };
+      doneCount++;
+      if (doneCount === nSeg) assemble();
+      else runNext();
+    };
+    worker.postMessage({ channels, rate, numSamples: job.procEnd - job.procStart },
+      channels.map(c => c.buffer));
+  }
+  for (let i = 0; i < maxWorkers; i++) runNext();
+
+  function assemble() {
     const ctx = getCtx();
-    const buf = ctx.createBuffer(result.length, result[0].length, ctx.sampleRate);
-    for (let c = 0; c < result.length; c++) buf.getChannelData(c).set(result[c]);
-    d.keyLockBuffer = buf;
+    const outLen = Math.round(n / rate);
+    const klBuf = ctx.createBuffer(nCh, outLen, sr);
+    for (let c = 0; c < nCh; c++) {
+      const out = klBuf.getChannelData(c);
+      for (const { job, chans } of results) {
+        const seg = chans[c];
+        const trim = Math.round((job.inStart - job.procStart) / rate); // 앞 여유분 건너뛰기
+        const outStart = Math.round(job.inStart / rate);
+        const wantLen = Math.round((job.inEnd - job.inStart) / rate);
+        // 마지막 조각이 아니면 XF만큼 더 채워 다음 조각이 그 위에 블렌드하게 함
+        const writeLen = job.k < nSeg - 1 ? wantLen + XF : wantLen;
+        for (let i = 0; i < writeLen; i++) {
+          const oi = outStart + i;
+          if (oi >= outLen) break;
+          const s = seg[trim + i] || 0;
+          if (job.k > 0 && i < XF) {
+            const w = i / XF;
+            out[oi] = out[oi] * (1 - w) + s * w; // 경계 크로스페이드
+          } else {
+            out[oi] = s;
+          }
+        }
+      }
+    }
+    d.keyLockBuffer = klBuf;
     d.keyLockProcessing = false;
-    worker.terminate();
     setStatus(`덱 ${d.idx + 1} Key Lock 완료`, 'success');
     if (d.isPlaying) { snapshotDeckPos(d); d.targetRate = d.baseRate; startDeckSource(d); }
-  };
-  worker.postMessage({channels, rate: d.baseRate, numSamples: d.buffer.length},
-    channels.map(c => c.buffer));
+  }
 }
 
 document.querySelectorAll('.deck-kl-btn').forEach(btn => {
