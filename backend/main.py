@@ -113,8 +113,9 @@ def _fetch_title_async(qid: str, url: str):
                     if q:
                         q["title"] = title
                         _save_queue()
-        except Exception:
-            pass  # 제목은 부가 정보 — 실패해도 링크로 표시됨
+        except Exception as e:
+            # 제목은 부가 정보 — 실패해도 링크로 표시되지만, oEmbed가 막히기 시작하면 알아야 함
+            log.warning("oEmbed 제목 조회 실패 (%s): %s", url, e)
     threading.Thread(target=run, daemon=True).start()
 
 
@@ -250,6 +251,7 @@ async def upload_audio(
     try:
         parsed_duration = float(duration) if duration.strip() else None
     except ValueError:
+        log.warning("duration 파싱 실패, None으로 처리: %r (title=%s)", duration, title)
         parsed_duration = None
 
     ext = Path(file.filename).suffix.lower()
