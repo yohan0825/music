@@ -46,19 +46,20 @@ document.addEventListener('visibilitychange', () => {
 let masterGain = null;
 let masterVolNode = null;
 let masterAnalyser = null;
-let impulseBuffer = null;
-
-function getImpulseResponse(ctx) {
-  if (!impulseBuffer) {
-    const dur = 2.5, sr = ctx.sampleRate;
-    impulseBuffer = ctx.createBuffer(2, sr * dur, sr);
-    for (let c = 0; c < 2; c++) {
-      const d = impulseBuffer.getChannelData(c);
-      for (let i = 0; i < d.length; i++)
-        d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 2.8);
+// 리버브 임펄스 생성: 프리딜레이(초) 만큼 무음 후 지수 감쇠 노이즈 (decay초에 -26dB)
+function makeImpulse(ctx, decay, predelay) {
+  const sr = ctx.sampleRate;
+  const pre = Math.round(predelay * sr);
+  const len = pre + Math.max(1, Math.round(decay * sr));
+  const buf = ctx.createBuffer(2, len, sr);
+  for (let c = 0; c < 2; c++) {
+    const d = buf.getChannelData(c);
+    for (let i = pre; i < len; i++) {
+      const t = (i - pre) / sr;
+      d[i] = (Math.random() * 2 - 1) * Math.exp(-3 * t / decay);
     }
   }
-  return impulseBuffer;
+  return buf;
 }
 
 function getMaster() {
@@ -973,6 +974,7 @@ function makeDeck(idx) {
     loopActive: false, loopStart: 0, loopEnd: 0,
     hotCues: [null, null, null, null],
     bpm: null,
+    reverbDecay: 2.5, reverbPre: 0.02,
     keyLockEnabled: false, keyLockBuffer: null, keyLockProcessing: false,
   };
 }
@@ -1015,7 +1017,7 @@ function ensureDeckGain(d) {
 
   // Reverb (convolver with generated impulse)
   d.reverb = ctx.createConvolver();
-  d.reverb.buffer = getImpulseResponse(ctx);
+  d.reverb.buffer = makeImpulse(ctx, d.reverbDecay, d.reverbPre);
   d.reverbWet = ctx.createGain();
   d.reverbWet.gain.value = 0;
 
@@ -1953,8 +1955,36 @@ document.querySelectorAll('.reverb-slider').forEach(sl => {
     const d = decks[+sl.dataset.deck];
     if (!d.reverbWet) { ensureDeckGain(d); }
     if (d.reverbWet) d.reverbWet.gain.value = +sl.value;
-    const valEl = sl.closest('.fx-group')?.querySelector('.fx-val');
+    const valEl = sl.closest('.rvb-ctl')?.querySelector('.fx-val');
     if (valEl) valEl.textContent = Math.round(sl.value * 100) + '%';
+  });
+});
+
+// 리버브 DECAY/PREDELAY: 임펄스를 다시 만들어야 해서 드래그 멈춘 뒤 150ms에 반영
+function scheduleReverbRebuild(d) {
+  clearTimeout(d._rvbTimer);
+  d._rvbTimer = setTimeout(() => {
+    if (d.reverb) d.reverb.buffer = makeImpulse(getCtx(), d.reverbDecay, d.reverbPre);
+  }, 150);
+}
+
+document.querySelectorAll('.rvb-decay').forEach(sl => {
+  sl.addEventListener('input', () => {
+    const d = decks[+sl.dataset.deck];
+    d.reverbDecay = +sl.value;
+    const valEl = sl.closest('.rvb-ctl')?.querySelector('.fx-val');
+    if (valEl) valEl.textContent = d.reverbDecay.toFixed(1) + 's';
+    if (d.reverb) scheduleReverbRebuild(d);
+  });
+});
+
+document.querySelectorAll('.rvb-pre').forEach(sl => {
+  sl.addEventListener('input', () => {
+    const d = decks[+sl.dataset.deck];
+    d.reverbPre = +sl.value;
+    const valEl = sl.closest('.rvb-ctl')?.querySelector('.fx-val');
+    if (valEl) valEl.textContent = Math.round(d.reverbPre * 1000) + 'ms';
+    if (d.reverb) scheduleReverbRebuild(d);
   });
 });
 

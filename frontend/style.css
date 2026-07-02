@@ -761,6 +761,22 @@ header {
 }
 .echo-slider { flex: 1; accent-color: #fa0; cursor: pointer; }
 .reverb-slider { flex: 1; accent-color: #a4f; cursor: pointer; }
+
+.fx-reverb { flex: 2; gap: 8px; }
+.rvb-ctl {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  font-size: .52rem;
+  color: var(--muted);
+  letter-spacing: .06em;
+  font-family: "Courier New", monospace;
+  min-width: 0;
+}
+.rvb-ctl input[type=range] { width: 100%; accent-color: #a4f; cursor: pointer; }
+.rvb-ctl .fx-val { min-width: 0; text-align: center; }
 .fx-val {
   font-size: .62rem;
   font-family: "Courier New", monospace;
