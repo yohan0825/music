@@ -5,6 +5,7 @@
 """
 
 import json
+import logging
 import os
 import re
 import threading
@@ -52,12 +53,23 @@ app.add_middleware(
 _lock = threading.Lock()
 
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+log = logging.getLogger("music-mixer")
+
+
 def _load_json(path: Path, default):
+    """JSON 로드. 깨진 파일은 .corrupt-시각으로 보존한다 —
+    조용히 기본값으로 시작하면 다음 저장 때 깨진 원본을 덮어써 복구가 불가능해진다."""
     if path.exists():
         try:
             return json.loads(path.read_text(encoding="utf-8"))
         except Exception:
-            pass
+            backup = path.with_name(f"{path.name}.corrupt-{time.strftime('%Y%m%d-%H%M%S')}")
+            log.exception("%s 파싱 실패 — %s로 보존하고 빈 데이터로 시작", path.name, backup.name)
+            try:
+                path.rename(backup)
+            except OSError:
+                log.exception("깨진 파일 백업 실패: %s", path)
     return default
 
 
