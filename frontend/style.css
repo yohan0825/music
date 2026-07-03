@@ -742,7 +742,8 @@ header {
 /* ── FX row ── */
 .deck-fx-row {
   display: flex;
-  gap: 10px;
+  flex-wrap: wrap; /* 좁으면 리버브 그룹이 다음 줄로 — ECHO 값과 REVERB 라벨 겹침 방지 */
+  gap: 8px 16px;
   padding: 2px 0;
 }
 .fx-group {
@@ -908,16 +909,17 @@ header {
 /* ── Hot cues ── */
 .hotcue-row {
   display: flex;
-  gap: 4px;
-  margin-left: auto;
+  gap: 8px;
+  margin-top: 6px;
 }
 .hotcue-btn {
-  width: 30px; height: 30px;
+  flex: 1;
+  height: 40px;
   border: 1px solid rgba(255,255,255,.1);
   background: var(--hc, var(--surface2));
   filter: brightness(0.18);
   color: #fff;
-  font-size: .7rem;
+  font-size: .8rem;
   font-family: "Courier New", monospace;
   cursor: pointer;
   transition: filter .2s;
@@ -1052,7 +1054,7 @@ header { position: relative; }
 }
 
 .deck-disc {
-  width: clamp(220px, 26vw, 340px);
+  width: clamp(220px, 31vw, 440px);
   aspect-ratio: 1 / 1;
   border-radius: 50%;
   background:
