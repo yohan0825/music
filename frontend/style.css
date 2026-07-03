@@ -986,27 +986,18 @@ header {
 }
 
 /* ── Recording bar ── */
-.rec-bar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 20px;
-  background: var(--surface);
-  border-top: 1px solid var(--border2);
-  border-bottom: 1px solid var(--border2);
-  flex-shrink: 0;
-}
 .rec-btn {
-  padding: 5px 14px;
+  padding: 3px 10px;
   border: 1px solid #c00;
   background: transparent;
   color: #c00;
   font-family: "Courier New", monospace;
-  font-size: .78rem;
+  font-size: .68rem;
   letter-spacing: .08em;
   cursor: pointer;
   border-radius: 0;
   transition: background .15s, color .15s;
+  white-space: nowrap;
 }
 .rec-btn:hover { background: rgba(200,0,0,.12); }
 .rec-btn.recording {
@@ -1017,11 +1008,10 @@ header {
 @keyframes rec-blink { 0%,100%{opacity:1} 50%{opacity:.55} }
 .rec-status {
   font-family: "Courier New", monospace;
-  font-size: .82rem;
+  font-size: .72rem;
   color: #c00;
   min-width: 3ch;
 }
-.rec-hint { font-size: .72rem; color: var(--muted); }
 
 /* ── Header save indicator ── */
 header { position: relative; }
@@ -1062,8 +1052,8 @@ header { position: relative; }
 }
 
 .deck-disc {
-  width: 220px;
-  height: 220px;
+  width: clamp(220px, 26vw, 340px);
+  aspect-ratio: 1 / 1;
   border-radius: 50%;
   background:
     radial-gradient(circle at 50% 50%, #000 0%, #000 4%, transparent 4%),
@@ -1102,11 +1092,12 @@ header { position: relative; }
 
 .scratch-sens-bar {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 10px;
-  margin-top: 10px;
+  gap: 6px;
+  margin-top: 24px;
 }
+.scratch-sens-bar input[type=range] { width: 110px; }
 .sens-label {
   font-size: .62rem;
   color: var(--muted);
@@ -1240,12 +1231,7 @@ header { position: relative; }
 }
 .vol-vertical:focus-visible { outline: 1px solid var(--text); border-radius: 0; }
 
-.deck-sep {
-  width: 1px;
-  height: 160px;
-  background: var(--border2);
-  flex-shrink: 0;
-}
+.deck-sep { flex-shrink: 0; }
 
 .track-picker-overlay {
   position: fixed;

@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
 <title>뮤직믹서</title>
-<link rel="stylesheet" href="style.css?v=6" />
+<link rel="stylesheet" href="style.css?v=8" />
 </head>
 <body>
   <div class="app">
@@ -16,6 +16,8 @@
         <span id="master-vol-val">0.90</span>
         <canvas id="vu-canvas" width="10" height="32"></canvas>
         <canvas id="spectrum-canvas" width="80" height="32"></canvas>
+        <button id="rec-btn" class="rec-btn" title="전체 출력 녹음 → 추출 탭에 추가">⏺ REC</button>
+        <span id="rec-status" class="rec-status"></span>
         <span id="midi-indicator" class="midi-indicator" title="Web MIDI">MIDI ○</span>
       </div>
       <span id="save-indicator" class="save-indicator">SAVED</span>
@@ -190,12 +192,17 @@
           </div>
         </div>
 
-        <!-- 크로스페이더 -->
+        <!-- 크로스페이더 + 스크래치 감도 (덱 사이 공간) -->
         <div class="deck-sep">
           <div class="crossfader-wrap">
             <span class="crossfader-label">A</span>
             <input type="range" id="crossfader" min="0" max="1" step="0.001" value="0.5">
             <span class="crossfader-label">B</span>
+          </div>
+          <div class="scratch-sens-bar">
+            <span class="sens-label">SCRATCH</span>
+            <input type="range" id="scratch-sens" min="0.1" max="2" step="0.05" value="0.5" aria-label="스크래치 감도">
+            <span id="scratch-sens-val">0.50x</span>
           </div>
         </div>
 
@@ -294,23 +301,11 @@
         </div>
       </div>
 
-      <!-- 스크래치 감도 -->
-      <div class="scratch-sens-bar">
-        <span class="sens-label">SCRATCH 감도</span>
-        <input type="range" id="scratch-sens" min="0.1" max="2" step="0.05" value="0.5" aria-label="스크래치 감도">
-        <span id="scratch-sens-val">0.50x</span>
-      </div>
-
-      <!-- 녹음 바 -->
-      <div class="rec-bar">
-        <button id="rec-btn" class="rec-btn">⏺ REC</button>
-        <span id="rec-status" class="rec-status"></span>
-        <span class="rec-hint">모든 오디오 출력 녹음 → 추출 탭에 추가</span>
-      </div>
-
       <p class="sampler-hint">
         핫큐 <kbd>1</kbd>~<kbd>4</kbd>: 탭 = 저장·이동, 길게 누르면 삭제
-        &nbsp;·&nbsp; 디스크 드래그 = 스크래치 (감도는 위 슬라이더)
+        &nbsp;·&nbsp; 디스크 드래그 = 스크래치
+        &nbsp;·&nbsp; 파형 탭·드래그 = 위치 이동
+        &nbsp;·&nbsp; ⏺ REC(우측 상단) = 전체 출력 녹음 → 추출 탭
       </p>
 
       <!-- 트랙 선택 모달 -->
@@ -390,6 +385,6 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js"></script>
-  <script src="app.js?v=7"></script>
+  <script src="app.js?v=8"></script>
 </body>
 </html>
