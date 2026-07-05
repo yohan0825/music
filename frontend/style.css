@@ -409,6 +409,8 @@ header h1 {
 .tl-label-controls .mute-btn,
 .tl-label-controls .tl-pad,
 .tl-label-controls .tl-rm { flex-shrink: 0; }
+/* range 입력의 브라우저 기본 최소폭(~129px) 때문에 뒤 버튼이 밀려 잘리던 것 방지 */
+.vol-slider { min-width: 0; flex: 1 1 0; }
 .vol-slider {
   flex: 1;
   -webkit-appearance: none;
