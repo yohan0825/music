@@ -301,10 +301,13 @@ def get_audio(track_id: str, download: int = 0):
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="파일이 존재하지 않습니다.")
 
+    # 트랙 파일은 id별로 불변이라 브라우저가 영구 캐시해도 안전 — 재방문 시 다운로드 생략
+    cache_headers = {"Cache-Control": "public, max-age=31536000, immutable"}
     if download:
         safe_title = re.sub(r"[^\w\-. ]", "_", track["title"])[:80]
-        return FileResponse(file_path, media_type="audio/mpeg", filename=f"{safe_title}.mp3")
-    return FileResponse(file_path, media_type="audio/mpeg")
+        return FileResponse(file_path, media_type="audio/mpeg",
+                            filename=f"{safe_title}.mp3", headers=cache_headers)
+    return FileResponse(file_path, media_type="audio/mpeg", headers=cache_headers)
 
 
 app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")

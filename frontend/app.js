@@ -90,11 +90,21 @@ function getMaster() {
   return masterGain;
 }
 
-async function loadBuffer(trackId) {
-  const ctx = getCtx();
-  const resp = await fetch(`/api/audio/${trackId}`);
-  const arr = await resp.arrayBuffer();
-  return ctx.decodeAudioData(arr);
+// 디코딩된 버퍼 전역 캐시 — 같은 곡을 덱/패드/믹서가 각각 다시 받고 디코딩하지 않게
+const bufferCache = new Map(); // trackId → Promise<AudioBuffer>
+
+function loadBuffer(trackId) {
+  if (!bufferCache.has(trackId)) {
+    const p = (async () => {
+      const ctx = getCtx();
+      const resp = await fetch(`/api/audio/${trackId}`);
+      const arr = await resp.arrayBuffer();
+      return ctx.decodeAudioData(arr);
+    })();
+    bufferCache.set(trackId, p);
+    p.catch(() => bufferCache.delete(trackId)); // 실패한 로드는 재시도 가능하게
+  }
+  return bufferCache.get(trackId);
 }
 
 function escHtml(s) {
@@ -211,6 +221,7 @@ async function removeTrack(id, li) {
   }
   const idx = tracks.findIndex(t => t.id === id);
   if (idx >= 0) tracks.splice(idx, 1);
+  bufferCache.delete(id);
   li.remove();
   if (tracks.length === 0) trackEmptyState.style.display = '';
 }
