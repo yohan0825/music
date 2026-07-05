@@ -107,6 +107,18 @@ function loadBuffer(trackId) {
   return bufferCache.get(trackId);
 }
 
+// 버퍼의 특정 구간(초)만 잘라 새 버퍼로
+function sliceBuffer(buf, start, end) {
+  const ctx = getCtx();
+  const sr = buf.sampleRate;
+  const s = Math.max(0, Math.floor(start * sr));
+  const e = Math.min(buf.length, Math.floor(end * sr));
+  const out = ctx.createBuffer(buf.numberOfChannels, Math.max(1, e - s), sr);
+  for (let c = 0; c < buf.numberOfChannels; c++)
+    out.getChannelData(c).set(buf.getChannelData(c).subarray(s, e));
+  return out;
+}
+
 function escHtml(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
@@ -505,6 +517,7 @@ function renderMixerTrack(mt) {
       <input type="range" class="vol-slider" min="0" max="1" step="0.01" value="${mt.volume ?? 1}">
       <input type="range" class="pan-slider" min="-1" max="1" step="0.01" value="${mt.pan ?? 0}" title="Pan L ↔ R">
       <button class="mute-btn ${mt.muted ? 'muted' : ''}">M</button>
+      <button class="tl-pad" title="지금 트림된 구간을 패드로 보내기">P</button>
       <button class="tl-rm">✕</button>
     </div>
   `;
@@ -515,6 +528,24 @@ function renderMixerTrack(mt) {
     mt.muted = !mt.muted;
     e.currentTarget.classList.toggle('muted', mt.muted);
     scheduleSave();
+  });
+  label.querySelector('.tl-pad').addEventListener('click', () => {
+    const idx = pads.indexOf(null);
+    if (idx === -1) { setStatus('패드가 모두 사용 중입니다', 'error'); return; }
+    const assign = buf => {
+      pads[idx] = {
+        id: mt.id, title: `${mt.title} (조각)`,
+        duration: mt.trimEnd - mt.trimStart,
+        buffer: sliceBuffer(buf, mt.trimStart, mt.trimEnd),
+        trimStart: mt.trimStart, trimEnd: mt.trimEnd,
+        padVolume: 1, padPitch: 0, padMode: 'oneshot',
+      };
+      renderPads();
+      scheduleSave();
+      setStatus(`"${mt.title}" 트림 구간이 패드 ${idx + 1}에 들어갔어요`, 'success');
+    };
+    if (mt.buffer) assign(mt.buffer);
+    else loadBuffer(mt.id).then(assign);
   });
   label.querySelector('.tl-rm').addEventListener('click', () => removeMixerTrack(mt));
   tlLabels.appendChild(label);
@@ -947,7 +978,8 @@ function triggerPad(idx) {
   if (!pad.buffer) {
     el.classList.add('loading');
     loadBuffer(pad.id).then(buf => {
-      pad.buffer = buf;
+      // 믹서에서 온 조각 패드면 트림 구간만 잘라서 사용
+      pad.buffer = pad.trimStart != null ? sliceBuffer(buf, pad.trimStart, pad.trimEnd) : buf;
       el.classList.remove('loading');
       playPad(idx);
     });
@@ -1982,7 +2014,8 @@ function saveProject() {
       pan: mt.pan ?? 0, automation: mt.automation ?? [],
     })),
     pads: pads.map(p => (p && !p.id.startsWith('rec_'))
-      ? { id: p.id, padVolume: p.padVolume ?? 1, padPitch: p.padPitch ?? 0, padMode: p.padMode ?? 'oneshot' }
+      ? { id: p.id, padVolume: p.padVolume ?? 1, padPitch: p.padPitch ?? 0, padMode: p.padMode ?? 'oneshot',
+          trimStart: p.trimStart ?? null, trimEnd: p.trimEnd ?? null, title: p.title }
       : null),
     playlist: playlist.filter(t => !t.id.startsWith('rec_')).map(t => t.id),
   };
@@ -2023,7 +2056,10 @@ function restoreProject() {
     const id = typeof saved === 'string' ? saved : saved.id;
     const t = tracks.find(tr => tr.id === id);
     if (t && !pads[i]) pads[i] = {
-      id: t.id, title: t.title, duration: t.duration, buffer: null,
+      id: t.id, title: saved.title || t.title,
+      duration: saved.trimStart != null ? saved.trimEnd - saved.trimStart : t.duration,
+      buffer: null,
+      trimStart: saved.trimStart ?? null, trimEnd: saved.trimEnd ?? null,
       padVolume: saved.padVolume ?? 1, padPitch: saved.padPitch ?? 0, padMode: saved.padMode ?? 'oneshot',
     };
   });
