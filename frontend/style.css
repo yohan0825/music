@@ -512,6 +512,10 @@ header h1 {
 }
 .track-block:hover { filter: brightness(1.15); }
 .track-block:active { cursor: grabbing; }
+.track-block.moving {
+  outline: 2px solid #fff;
+  filter: brightness(1.35);
+}
 .block-label {
   overflow: hidden;
   text-overflow: ellipsis;

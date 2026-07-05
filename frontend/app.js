@@ -565,29 +565,66 @@ function removeMixerTrack(mt) {
 // ─────────────────────────────────────────────
 // Block drag to reposition
 // ─────────────────────────────────────────────
+// 블록 제스처: 그냥 드래그 = 잡은 쪽 절반의 길이 조절(왼쪽=시작점, 오른쪽=끝점),
+// 길게(350ms) 누르고 있으면 이동 모드로 전환
 function setupBlockDrag(block, mt) {
   block.addEventListener('pointerdown', e => {
     if (e.target.classList.contains('trim-handle')) return;
     if (e.button === 2) return;
+    if (e.altKey) return; // Alt+클릭은 자동화 캔버스 몫
     e.preventDefault();
     pushUndo();
     const startX = e.clientX;
+    const rect = block.getBoundingClientRect();
+    const leftHalf = (e.clientX - rect.left) < rect.width / 2;
     const origOffset = mt.startOffset;
+    const origStart = mt.trimStart, origEnd = mt.trimEnd;
+    let mode = 'trim';
+    let dragged = false;
+    const holdTimer = setTimeout(() => {
+      if (!dragged) { mode = 'move'; block.classList.add('moving'); }
+    }, 350);
+
     trackPointer(e, ev => {
-      let t = Math.max(0, origOffset + (ev.clientX - startX) / PPS);
-      if (snapEnabled) {
-        const bpm = parseFloat(document.getElementById('mixer-bpm')?.value) || 120;
-        const beat = 60 / bpm;
-        t = Math.round(t / beat) * beat;
+      const dx = (ev.clientX - startX) / PPS;
+      if (Math.abs(ev.clientX - startX) > 6) dragged = true;
+      if (mode === 'move') {
+        let t = Math.max(0, origOffset + dx);
+        if (snapEnabled) t = snapTime(t, mt);
+        mt.startOffset = t;
+      } else if (leftHalf) {
+        mt.trimStart = Math.max(0, Math.min(origStart + dx, mt.trimEnd - 0.5));
+      } else {
+        mt.trimEnd = Math.max(mt.trimStart + 0.5, Math.min(origEnd + dx, mt.duration));
       }
-      mt.startOffset = t;
       updateBlockGeometry(mt);
     }, () => {
+      clearTimeout(holdTimer);
+      block.classList.remove('moving');
       buildRuler();
       updateMixerTimeDisplay();
       scheduleSave();
     });
   });
+}
+
+// 스냅: BPM 비트 격자 + 다른 블록 가장자리 자석 (0.15초 이내면 달라붙음)
+function snapTime(t, mt) {
+  const bpm = parseFloat(document.getElementById('mixer-bpm')?.value) || 120;
+  const beat = 60 / bpm;
+  let snapped = Math.round(t / beat) * beat;
+  const myLen = mt.trimEnd - mt.trimStart;
+  const MAG = 0.15;
+  for (const other of mixerTracks) {
+    if (other === mt) continue;
+    const oStart = other.startOffset;
+    const oEnd = other.startOffset + (other.trimEnd - other.trimStart);
+    for (const edge of [oStart, oEnd]) {
+      if (Math.abs(t - edge) < MAG) snapped = edge;               // 내 시작 ↔ 상대 가장자리
+      if (Math.abs(t + myLen - edge) < MAG) snapped = edge - myLen; // 내 끝 ↔ 상대 가장자리
+    }
+  }
+  return Math.max(0, snapped);
 }
 
 // ─────────────────────────────────────────────
