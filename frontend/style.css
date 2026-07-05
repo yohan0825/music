@@ -366,7 +366,7 @@ header h1 {
 .timeline-container { flex: 1; display: flex; overflow: hidden; min-height: 0; }
 
 .timeline-label-col {
-  width: 160px;
+  width: 200px; /* 컨트롤(볼륨·팬·M·P·✕)이 다 들어가는 폭 */
   flex-shrink: 0;
   border-right: 1px solid var(--border);
   display: flex;
@@ -405,7 +405,10 @@ header h1 {
   white-space: nowrap;
   color: var(--muted2);
 }
-.tl-label-controls { display: flex; align-items: center; gap: 5px; }
+.tl-label-controls { display: flex; align-items: center; gap: 4px; }
+.tl-label-controls .mute-btn,
+.tl-label-controls .tl-pad,
+.tl-label-controls .tl-rm { flex-shrink: 0; }
 .vol-slider {
   flex: 1;
   -webkit-appearance: none;
@@ -1393,7 +1396,8 @@ header { position: relative; }
 
 /* ─── Pan slider ─────────────────────────────── */
 .pan-slider {
-  width: 56px;
+  width: 44px;
+  flex-shrink: 0;
   accent-color: #a4f;
   cursor: pointer;
 }
