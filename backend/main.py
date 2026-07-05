@@ -279,6 +279,23 @@ def list_tracks():
     return list(TRACKS.values())
 
 
+class RenameRequest(BaseModel):
+    title: str
+
+
+@app.patch("/api/tracks/{track_id}")
+def rename_track(track_id: str, req: RenameRequest):
+    track = TRACKS.get(track_id)
+    if not track:
+        raise HTTPException(status_code=404, detail="트랙을 찾을 수 없습니다.")
+    title = req.title.strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="제목을 입력해주세요.")
+    track["title"] = title[:200]
+    _save_tracks()
+    return track
+
+
 @app.delete("/api/tracks/{track_id}")
 def delete_track(track_id: str):
     track = TRACKS.pop(track_id, None)

@@ -205,6 +205,7 @@ function addTrackToList(track) {
   li.innerHTML = `
     <div class="track-header">
       <span class="track-title">${escHtml(track.title)}</span>
+      <button class="btn-ghost track-rename" data-action="rename" aria-label="제목 편집">✏</button>
       <span class="track-dur">${fmtTime(track.duration)}</span>
     </div>
     <div class="track-actions">
@@ -222,8 +223,34 @@ function addTrackToList(track) {
     if (action === 'pad')      addToPad(track);
     if (action === 'playlist') addToPlaylist(track);
     if (action === 'delete')   removeTrack(track.id, li);
+    if (action === 'rename')   renameTrack(track, li);
   });
   trackListEl.prepend(li);
+}
+
+async function renameTrack(track, li) {
+  const newTitle = prompt('새 제목', track.title);
+  if (newTitle == null) return;
+  const title = newTitle.trim();
+  if (!title) return;
+  // 녹음 트랙(rec_)은 서버에 없으니 로컬만 변경
+  if (!track.id.startsWith('rec_')) {
+    try {
+      const res = await fetch(`/api/tracks/${track.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title }),
+      });
+      if (!res.ok) throw new Error((await res.json()).detail || '변경 실패');
+    } catch (err) {
+      setStatus(err.message, 'error');
+      return;
+    }
+  }
+  track.title = title;
+  const titleEl = li.querySelector('.track-title');
+  if (titleEl) titleEl.textContent = title;
+  setStatus('제목이 변경됐어요', 'success');
 }
 
 async function removeTrack(id, li) {
@@ -908,7 +935,6 @@ function renderPads() {
     el.innerHTML = pad
       ? `<span class="pad-num">${i + 1}</span>
          <span class="pad-icon">🎵</span>
-         <span class="pad-name">${escHtml(pad.title)}</span>
          <button class="pad-settings-btn" aria-label="패드 설정">⚙</button>
          <button class="pad-clear-btn">✕</button>`
       : `<span class="pad-num">${i + 1}</span>
