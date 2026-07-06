@@ -486,12 +486,11 @@ tlScroll.addEventListener('scroll', () => { labelCol.scrollTop = tlScroll.scroll
 // ─────────────────────────────────────────────
 // Add track to mixer
 // ─────────────────────────────────────────────
+let mixerUid = 1; // 블록 인스턴스 식별자 — 같은 곡을 여러 조각으로 올릴 수 있게 id와 분리
+
 function addToMixer(track) {
-  if (mixerTracks.find(mt => mt.id === track.id)) {
-    setStatus(`"${track.title}" 이미 믹서에 있어요`, 'error');
-    return;
-  }
   const mt = {
+    uid: mixerUid++,
     id: track.id,
     title: track.title,
     duration: track.duration || 180,
@@ -537,7 +536,7 @@ function renderMixerTrack(mt) {
   // Label column entry
   const label = document.createElement('div');
   label.className = 'tl-label';
-  label.dataset.id = mt.id;
+  label.dataset.uid = mt.uid;
   label.innerHTML = `
     <div class="tl-label-name" title="${escHtml(mt.title)}">${escHtml(mt.title)}</div>
     <div class="tl-label-controls">
@@ -580,7 +579,7 @@ function renderMixerTrack(mt) {
   // Timeline lane
   const lane = document.createElement('div');
   lane.className = 'tl-lane';
-  lane.dataset.id = mt.id;
+  lane.dataset.uid = mt.uid;
 
   const block = document.createElement('div');
   block.className = 'track-block';
@@ -613,7 +612,7 @@ function removeMixerTrack(mt) {
   const idx = mixerTracks.indexOf(mt);
   if (idx >= 0) mixerTracks.splice(idx, 1);
   mt.laneEl?.remove();
-  tlLabels.querySelector(`[data-id="${mt.id}"]`)?.remove();
+  tlLabels.querySelector(`[data-uid="${mt.uid}"]`)?.remove();
   buildRuler();
   refreshMixerVisibility();
   updateMixerTimeDisplay();
@@ -623,8 +622,7 @@ function removeMixerTrack(mt) {
 // ─────────────────────────────────────────────
 // Block drag to reposition
 // ─────────────────────────────────────────────
-// 블록 제스처: 그냥 드래그 = 잡은 쪽 절반의 길이 조절(왼쪽=시작점, 오른쪽=끝점),
-// 길게(350ms) 누르고 있으면 이동 모드로 전환
+// 블록 드래그 = 이동. 자르기는 ✂(재생선 위치에서 분할), 미세조정은 양끝 핸들.
 function setupBlockDrag(block, mt) {
   block.addEventListener('pointerdown', e => {
     if (e.target.classList.contains('trim-handle')) return;
@@ -633,37 +631,38 @@ function setupBlockDrag(block, mt) {
     e.preventDefault();
     pushUndo();
     const startX = e.clientX;
-    const rect = block.getBoundingClientRect();
-    const leftHalf = (e.clientX - rect.left) < rect.width / 2;
     const origOffset = mt.startOffset;
-    const origStart = mt.trimStart, origEnd = mt.trimEnd;
-    let mode = 'trim';
-    let dragged = false;
-    const holdTimer = setTimeout(() => {
-      if (!dragged) { mode = 'move'; block.classList.add('moving'); }
-    }, 350);
-
     trackPointer(e, ev => {
-      const dx = (ev.clientX - startX) / PPS;
-      if (Math.abs(ev.clientX - startX) > 6) dragged = true;
-      if (mode === 'move') {
-        let t = Math.max(0, origOffset + dx);
-        if (snapEnabled) t = snapTime(t, mt);
-        mt.startOffset = t;
-      } else if (leftHalf) {
-        mt.trimStart = Math.max(0, Math.min(origStart + dx, mt.trimEnd - 0.5));
-      } else {
-        mt.trimEnd = Math.max(mt.trimStart + 0.5, Math.min(origEnd + dx, mt.duration));
-      }
+      let t = Math.max(0, origOffset + (ev.clientX - startX) / PPS);
+      if (snapEnabled) t = snapTime(t, mt);
+      mt.startOffset = t;
       updateBlockGeometry(mt);
     }, () => {
-      clearTimeout(holdTimer);
-      block.classList.remove('moving');
       buildRuler();
       updateMixerTimeDisplay();
       scheduleSave();
     });
   });
+}
+
+// ✂ 재생선 위치에서 블록 분할
+function splitBlockAt(mt, timelinePos) {
+  const localPos = mt.trimStart + (timelinePos - mt.startOffset);
+  if (localPos <= mt.trimStart + 0.2 || localPos >= mt.trimEnd - 0.2) return false;
+  const right = {
+    ...mt,
+    uid: mixerUid++,
+    trimStart: localPos,
+    startOffset: timelinePos,
+    automation: [],
+    blockEl: null,
+    laneEl: null,
+  };
+  mt.trimEnd = localPos;
+  mixerTracks.push(right);
+  renderMixerTrack(right);
+  updateBlockGeometry(mt);
+  return true;
 }
 
 // 스냅: BPM 비트 격자 + 다른 블록 가장자리 자석 (0.15초 이내면 달라붙음)
@@ -2035,7 +2034,7 @@ function saveProject() {
   const state = {
     mixer: mixerTracks.filter(mt => !mt.id.startsWith('rec_')).map(mt => ({
       id: mt.id, startOffset: mt.startOffset,
-      trimStart: mt.trimStart, trimEnd: mt.trimEnd,
+      trimStart: mt.trimStart, trimEnd: mt.trimEnd, duration: mt.duration,
       volume: mt.volume, muted: mt.muted, color: mt.color,
       pan: mt.pan ?? 0, automation: mt.automation ?? [],
     })),
@@ -2058,10 +2057,11 @@ function restoreProject() {
 
   (state.mixer || []).forEach(saved => {
     const track = tracks.find(t => t.id === saved.id);
-    if (!track || mixerTracks.find(m => m.id === saved.id)) return;
+    if (!track) return; // 같은 곡의 조각 여러 개도 전부 복원
     const mt = {
+      uid: mixerUid++,
       id: saved.id, title: track.title,
-      duration: track.duration || 180, buffer: null,
+      duration: saved.duration || track.duration || 180, buffer: null,
       startOffset: saved.startOffset,
       trimStart: saved.trimStart, trimEnd: saved.trimEnd,
       volume: saved.volume, muted: !!saved.muted, color: saved.color,
@@ -2217,6 +2217,28 @@ const snapBtn = document.getElementById('snap-toggle');
 snapBtn.addEventListener('click', () => {
   snapEnabled = !snapEnabled;
   snapBtn.classList.toggle('active', snapEnabled);
+});
+
+// ─────────────────────────────────────────────
+// ✂ 재생선 위치에서 자르기
+// ─────────────────────────────────────────────
+document.getElementById('split-btn').addEventListener('click', () => {
+  const pos = mixerPlaying
+    ? startPlayhead + (audioCtx.currentTime - startCtxTime)
+    : currentPlayhead;
+  pushUndo();
+  let count = 0;
+  for (const mt of [...mixerTracks]) {
+    if (splitBlockAt(mt, pos)) count++;
+  }
+  if (count) {
+    buildRuler();
+    scheduleSave();
+    setStatus(`재생선 위치에서 ${count}개 블록을 잘랐어요 — 필요 없는 쪽은 ✕로 삭제`, 'success');
+  } else {
+    undoStack.pop(); // 아무것도 안 잘랐으면 방금 쌓은 undo 제거
+    setStatus('재생선을 블록 위에 놓고 ✂를 누르세요 (타임라인 탭으로 이동)', 'error');
+  }
 });
 
 // ─────────────────────────────────────────────
@@ -2492,39 +2514,24 @@ function pushUndo() {
 }
 
 function applySnapshot(snap) {
+  // 같은 곡이 여러 조각으로 존재할 수 있어 id 매칭 대신 통째로 재구축
   const was = mixerPlaying;
   if (was) stopMixer(false);
-  // Remove tracks not in snapshot
   [...mixerTracks].forEach(mt => {
-    if (!snap.find(s => s.id === mt.id)) removeMixerTrack(mt);
+    mt.laneEl?.remove();
+    tlLabels.querySelector(`[data-uid="${mt.uid}"]`)?.remove();
   });
-  // Update or add
+  mixerTracks.length = 0;
   snap.forEach(s => {
-    let mt = mixerTracks.find(m => m.id === s.id);
-    if (!mt) {
-      const tr = tracks.find(t => t.id === s.id);
-      if (!tr) return;
-      addToMixer(tr);
-      mt = mixerTracks[mixerTracks.length - 1];
-    }
-    Object.assign(mt, {
-      startOffset: s.startOffset, trimStart: s.trimStart, trimEnd: s.trimEnd,
-      volume: s.volume, muted: s.muted, pan: s.pan, color: s.color,
-      automation: s.automation,
-    });
-    updateBlockGeometry(mt);
-    // Sync label controls
-    const labelEl = document.querySelector(`.tl-label[data-id="${mt.id}"]`);
-    if (labelEl) {
-      const vs = labelEl.querySelector('.vol-slider');
-      const ps = labelEl.querySelector('.pan-slider');
-      const mb = labelEl.querySelector('.mute-btn');
-      if (vs) vs.value = mt.volume;
-      if (ps) ps.value = mt.pan;
-      if (mb) mb.classList.toggle('muted', mt.muted);
-    }
+    const tr = tracks.find(t => t.id === s.id);
+    const mt = { ...s, uid: mixerUid++, buffer: null, blockEl: null, laneEl: null };
+    if (tr?._buffer) mt.buffer = tr._buffer; // 녹음 트랙은 서버에 없음
+    else loadBuffer(mt.id).then(buf => { mt.buffer = buf; });
+    mixerTracks.push(mt);
+    renderMixerTrack(mt);
   });
   buildRuler();
+  refreshMixerVisibility();
   updateMixerTimeDisplay();
   if (was) startMixer();
 }

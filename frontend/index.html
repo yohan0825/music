@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
 <title>뮤직믹서</title>
-<link rel="stylesheet" href="style.css?v=13" />
+<link rel="stylesheet" href="style.css?v=14" />
 </head>
 <body>
   <div class="app">
@@ -73,6 +73,7 @@
         <label class="bpm-label">BPM</label>
         <input type="number" id="mixer-bpm" class="bpm-input" value="120" min="40" max="240">
         <button id="snap-toggle" class="transport-btn">SNAP</button>
+        <button id="split-btn" class="transport-btn" title="재생선 위치에서 블록 자르기">✂</button>
         <button id="undo-btn" class="transport-btn" title="실행 취소 (Ctrl+Z)">↩</button>
         <button id="redo-btn" class="transport-btn" title="다시 실행 (Ctrl+Y)">↪</button>
         <button id="mixer-export" class="transport-btn export-btn">📥 WAV</button>
@@ -385,6 +386,6 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js"></script>
-  <script src="app.js?v=11"></script>
+  <script src="app.js?v=14"></script>
 </body>
 </html>
