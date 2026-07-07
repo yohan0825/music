@@ -128,12 +128,41 @@ def enqueue_extract(req: ExtractRequest):
 
     qid = uuid.uuid4().hex[:12]
     with _lock:
-        QUEUE[qid] = {"id": qid, "url": url, "status": "pending", "title": None, "error": None}
+        QUEUE[qid] = {"id": qid, "type": "extract", "url": url,
+                      "status": "pending", "title": None, "error": None}
         _save_queue()
     _fetch_title_async(qid, url)
 
     return {"queued": True, "queue_id": qid,
             "message": "추출 대기열에 추가됐어요. 집 PC가 켜져 있으면 곧 라이브러리에 나타나요."}
+
+
+STEM_NAMES = ("vocals", "drums", "bass", "other")
+
+
+@app.post("/api/tracks/{track_id}/separate")
+def enqueue_separate(track_id: str):
+    """트랙의 스템 분리를 큐에 넣는다 (요청한 트랙만, 실제 분리는 집 PC 워커)."""
+    track = TRACKS.get(track_id)
+    if not track:
+        raise HTTPException(status_code=404, detail="트랙을 찾을 수 없습니다.")
+    if track.get("stem_of"):
+        raise HTTPException(status_code=400, detail="스템 트랙은 다시 분리할 수 없습니다.")
+    status = track.get("stems", {}).get("status")
+    if status in ("queued", "processing"):
+        raise HTTPException(status_code=409, detail="이미 분리 작업이 진행 중입니다.")
+    if status == "done":
+        raise HTTPException(status_code=409, detail="이미 분리된 트랙입니다.")
+
+    qid = uuid.uuid4().hex[:12]
+    with _lock:
+        QUEUE[qid] = {"id": qid, "type": "separate", "track_id": track_id,
+                      "status": "pending", "title": f"{track['title']} (스템 분리)", "error": None}
+        track["stems"] = {"status": "queued", "model": "htdemucs"}
+        _save_queue()
+        _save_tracks()
+    return {"queued": True, "queue_id": qid,
+            "message": "스템 분리 대기열에 추가됐어요. 곡 길이에 따라 몇 분 걸려요."}
 
 
 @app.get("/api/queue")
@@ -157,20 +186,34 @@ def claim_next(token: str = Query("")):
             if q["status"] == "pending" or stale:
                 q["status"] = "processing"
                 q["claimed_at"] = now
+                job_type = q.get("type", "extract")
+                if job_type == "separate":
+                    track = TRACKS.get(q.get("track_id", ""))
+                    if track and "stems" in track:
+                        track["stems"]["status"] = "processing"
+                        _save_tracks()
                 _save_queue()
-                return {"queue_id": q["id"], "url": q["url"]}
+                return {"queue_id": q["id"], "type": job_type,
+                        "url": q.get("url"), "track_id": q.get("track_id")}
     return {}
 
 
 @app.post("/api/queue/{qid}/fail")
 def fail_queue(qid: str, token: str = Query(""), error: str = Form("")):
-    """워커가 추출 실패를 보고한다."""
+    """워커가 작업 실패를 보고한다."""
     _check_token(token)
     with _lock:
         q = QUEUE.get(qid)
         if q:
             q["status"] = "error"
             q["error"] = error[:300]
+            # 스템 분리 실패면 트랙 상태에도 반영 (버튼이 '재시도'로 바뀌게)
+            if q.get("type") == "separate":
+                track = TRACKS.get(q.get("track_id", ""))
+                if track and "stems" in track:
+                    track["stems"]["status"] = "failed"
+                    track["stems"]["error"] = error[:300]
+                    _save_tracks()
             _save_queue()
     return {"ok": True}
 
@@ -179,7 +222,13 @@ def fail_queue(qid: str, token: str = Query(""), error: str = Form("")):
 def remove_queue(qid: str):
     """대기열 취소. 처리 중이던 작업도 취소되면 업로드가 거부된다(410)."""
     with _lock:
-        QUEUE.pop(qid, None)
+        q = QUEUE.pop(qid, None)
+        # 분리 작업 취소면 트랙 상태를 되돌려 버튼이 다시 활성화되게
+        if q and q.get("type") == "separate":
+            track = TRACKS.get(q.get("track_id", ""))
+            if track and track.get("stems", {}).get("status") in ("queued", "processing"):
+                track.pop("stems", None)
+                _save_tracks()
         _save_queue()
     return {"ok": True}
 
@@ -214,6 +263,11 @@ def retry_queue(qid: str):
         q["status"] = "pending"
         q["error"] = None
         q.pop("claimed_at", None)
+        if q.get("type") == "separate":
+            track = TRACKS.get(q.get("track_id", ""))
+            if track and "stems" in track:
+                track["stems"]["status"] = "queued"
+                _save_tracks()
         _save_queue()
     return {"ok": True}
 
@@ -274,6 +328,55 @@ async def upload_audio(
     return result
 
 
+@app.post("/api/tracks/{track_id}/stems")
+async def upload_stems(
+    track_id: str,
+    vocals: UploadFile = File(...),
+    drums: UploadFile = File(...),
+    bass: UploadFile = File(...),
+    other: UploadFile = File(...),
+    queue_id: str = Form(""),
+    token: str = Form(""),
+):
+    """워커가 분리 결과(스템 4개 mp3)를 올린다. 각 스템은 자식 트랙으로 등록돼
+    기존 재생/믹서/패드 흐름을 그대로 탄다."""
+    _check_token(token)
+    track = TRACKS.get(track_id)
+    if not track:
+        raise HTTPException(status_code=404, detail="트랙을 찾을 수 없습니다.")
+    if queue_id:
+        with _lock:
+            if queue_id not in QUEUE:
+                raise HTTPException(status_code=410, detail="취소된 작업입니다.")
+
+    stem_dir = DOWNLOAD_DIR / "stems" / track_id
+    stem_dir.mkdir(parents=True, exist_ok=True)
+
+    uploads = {"vocals": vocals, "drums": drums, "bass": bass, "other": other}
+    files = {}
+    with _lock:
+        for stem, up in uploads.items():
+            dest = stem_dir / f"{stem}.mp3"
+            dest.write_bytes(await up.read())
+            rel = str(dest.relative_to(DOWNLOAD_DIR)).replace("\\", "/")
+            files[stem] = rel
+            child_id = f"{track_id}_{stem}"
+            TRACKS[child_id] = {
+                "id": child_id,
+                "title": f"{track['title']} · {stem}",
+                "duration": track.get("duration"),
+                "filename": rel,
+                "stem_of": track_id,
+                "stem": stem,
+            }
+        track["stems"] = {"status": "done", "model": "htdemucs", "files": files}
+        if queue_id:
+            QUEUE.pop(queue_id, None)
+            _save_queue()
+        _save_tracks()
+    return {"ok": True, "stems": files}
+
+
 @app.get("/api/tracks")
 def list_tracks():
     return list(TRACKS.values())
@@ -296,14 +399,30 @@ def rename_track(track_id: str, req: RenameRequest):
     return track
 
 
+def _delete_track_file(track: dict):
+    file_path = DOWNLOAD_DIR / track["filename"]
+    if file_path.exists():
+        file_path.unlink()
+
+
 @app.delete("/api/tracks/{track_id}")
 def delete_track(track_id: str):
     track = TRACKS.pop(track_id, None)
     if not track:
         raise HTTPException(status_code=404, detail="트랙을 찾을 수 없습니다.")
-    file_path = DOWNLOAD_DIR / track["filename"]
-    if file_path.exists():
-        file_path.unlink()
+    _delete_track_file(track)
+
+    # 원곡 삭제 시 자식 스템 트랙·파일도 함께 삭제
+    for child_id in [cid for cid, t in TRACKS.items() if t.get("stem_of") == track_id]:
+        _delete_track_file(TRACKS.pop(child_id))
+
+    # 스템 트랙을 개별 삭제하면 원곡의 stems 목록에서도 제거
+    parent = TRACKS.get(track.get("stem_of", ""))
+    if parent and "stems" in parent:
+        parent["stems"].get("files", {}).pop(track.get("stem", ""), None)
+        if not parent["stems"].get("files"):
+            parent.pop("stems", None)  # 전부 지웠으면 다시 분리 가능하게
+
     _save_tracks()
     return {"ok": True}
 
