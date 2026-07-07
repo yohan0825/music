@@ -199,8 +199,9 @@ function addTrackToList(track) {
   knownTrackIds.add(track.id);
   trackEmptyState.style.display = 'none';
 
+  const isStem = !!track.stem_of;
   const li = document.createElement('li');
-  li.className = 'track-item';
+  li.className = 'track-item' + (isStem ? ' stem-item' : '');
   li.dataset.id = track.id;
   li.innerHTML = `
     <div class="track-header">
@@ -214,8 +215,10 @@ function addTrackToList(track) {
       <button class="btn-primary" data-action="mixer" aria-label="믹서에 추가">+믹서</button>
       <button class="btn-outline" data-action="pad" aria-label="샘플러 패드에 추가">+패드</button>
       <button class="btn-ghost"  data-action="playlist" aria-label="플레이리스트에 추가">+목록</button>
+      ${isStem ? '' : '<button class="btn-outline" data-action="stems">스템 분리</button>'}
       <button class="btn-danger" data-action="delete" aria-label="${escHtml(track.title)} 삭제">🗑</button>
     </div>
+    ${isStem ? '' : '<ul class="stem-list"></ul>'}
   `;
   li.addEventListener('click', e => {
     const action = e.target.dataset.action;
@@ -224,8 +227,46 @@ function addTrackToList(track) {
     if (action === 'playlist') addToPlaylist(track);
     if (action === 'delete')   removeTrack(track.id, li);
     if (action === 'rename')   renameTrack(track, li);
+    if (action === 'stems')    requestStems(track, li);
   });
+
+  // 스템은 원곡 항목 아래에 중첩 표시
+  if (isStem) {
+    const holder = trackListEl.querySelector(`li[data-id="${track.stem_of}"] .stem-list`);
+    if (holder) { holder.appendChild(li); return; }
+  }
   trackListEl.prepend(li);
+  updateStemButton(li, track);
+}
+
+async function requestStems(track, li) {
+  try {
+    const res = await fetch(`/api/tracks/${track.id}/separate`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || '분리 요청 실패');
+    setStatus(data.message || '스템 분리 대기열에 추가됐어요', 'success');
+    track.stems = { status: 'queued' };
+    updateStemButton(li, track);
+    startQueuePolling();
+  } catch (err) {
+    setStatus(err.message, 'error');
+  }
+}
+
+function updateStemButton(li, track) {
+  const btn = li.querySelector('[data-action="stems"]');
+  if (!btn) return;
+  const st = track.stems?.status;
+  if (st === 'done') { btn.style.display = 'none'; return; }
+  btn.style.display = '';
+  btn.disabled = st === 'queued' || st === 'processing';
+  btn.textContent =
+    st === 'queued'     ? '분리 대기…' :
+    st === 'processing' ? '분리 중…'   :
+    st === 'failed'     ? '분리 재시도' : '스템 분리';
+  btn.title = st === 'failed'
+    ? (track.stems?.error || '분리 실패 — 다시 시도')
+    : '보컬/드럼/베이스/멜로디 4개 트랙으로 분리 (집 PC 필요, 몇 분 걸림)';
 }
 
 async function renameTrack(track, li) {
@@ -261,6 +302,14 @@ async function removeTrack(id, li) {
   const idx = tracks.findIndex(t => t.id === id);
   if (idx >= 0) tracks.splice(idx, 1);
   bufferCache.delete(id);
+  // 자식 스템도 로컬에서 정리 (서버는 연쇄 삭제, DOM은 중첩이라 li와 함께 사라짐)
+  for (let i = tracks.length - 1; i >= 0; i--) {
+    if (tracks[i].stem_of === id) {
+      knownTrackIds.delete(tracks[i].id);
+      bufferCache.delete(tracks[i].id);
+      tracks.splice(i, 1);
+    }
+  }
   li.remove();
   if (tracks.length === 0) trackEmptyState.style.display = '';
 }
@@ -297,8 +346,14 @@ async function refreshTracks() {
   try {
     const list = await (await fetch('/api/tracks')).json();
     for (const t of list) {
-      if (knownTrackIds.has(t.id)) continue;
-      knownTrackIds.add(t.id);
+      if (knownTrackIds.has(t.id)) {
+        // 이미 있는 트랙은 스템 분리 진행 상태만 갱신
+        const local = tracks.find(x => x.id === t.id);
+        if (local) local.stems = t.stems;
+        const li = trackListEl.querySelector(`li[data-id="${t.id}"]`);
+        if (li && !t.stem_of) updateStemButton(li, local || t);
+        continue;
+      }
       addTrackToList({
         ...t,
         stream_url: `/api/audio/${t.id}`,

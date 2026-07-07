@@ -1499,6 +1499,19 @@ input, textarea {
   user-select: none;
 }
 
+/* ─── Stems (자식 스템 중첩 목록) ─────────────── */
+.stem-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0 0 0 14px;
+  border-left: 2px solid var(--border2);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.stem-list:empty { display: none; }
+.stem-item .track-title { color: #4af; font-size: .8rem; }
+
 /* ─── Extract queue ──────────────────────────── */
 .queue-section { margin-top: 14px; }
 .queue-list {
