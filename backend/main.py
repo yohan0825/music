@@ -37,6 +37,7 @@ DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 TRACKS_FILE = DOWNLOAD_DIR / "tracks.json"
 QUEUE_FILE = DOWNLOAD_DIR / "queue.json"
+PLAYLISTS_FILE = DOWNLOAD_DIR / "playlists.json"
 
 # 로컬 워커가 큐를 폴링할 때 쓰는 인증 토큰 (없으면 인증 생략)
 WORKER_TOKEN = os.environ.get("WORKER_TOKEN", "")
@@ -84,6 +85,12 @@ def _save_queue():
 TRACKS: dict[str, dict] = _load_json(TRACKS_FILE, {})
 # QUEUE: qid -> {id, url, status: pending|processing|error, title, error}
 QUEUE: dict[str, dict] = _load_json(QUEUE_FILE, {})
+# PLAYLISTS: pid -> {id, name, track_ids: [...]}
+PLAYLISTS: dict[str, dict] = _load_json(PLAYLISTS_FILE, {})
+
+
+def _save_playlists():
+    PLAYLISTS_FILE.write_text(json.dumps(PLAYLISTS, ensure_ascii=False, indent=2), encoding="utf-8")
 
 YOUTUBE_URL_RE = re.compile(
     r"^(https?://)?(www\.)?(youtube\.com|youtu\.be|m\.youtube\.com)/.+"
@@ -382,6 +389,80 @@ def list_tracks():
     return list(TRACKS.values())
 
 
+# ── 플레이리스트 (서버 저장 → 모든 기기 공유) ──────────
+
+class PlaylistRequest(BaseModel):
+    name: str
+
+
+@app.get("/api/playlists")
+def list_playlists():
+    return list(PLAYLISTS.values())
+
+
+@app.post("/api/playlists")
+def create_playlist(req: PlaylistRequest):
+    name = req.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="플레이리스트 이름을 입력해주세요.")
+    pid = uuid.uuid4().hex[:12]
+    with _lock:
+        PLAYLISTS[pid] = {"id": pid, "name": name[:100], "track_ids": []}
+        _save_playlists()
+    return PLAYLISTS[pid]
+
+
+@app.patch("/api/playlists/{pid}")
+def rename_playlist(pid: str, req: PlaylistRequest):
+    pl = PLAYLISTS.get(pid)
+    if not pl:
+        raise HTTPException(status_code=404, detail="플레이리스트를 찾을 수 없습니다.")
+    name = req.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="플레이리스트 이름을 입력해주세요.")
+    with _lock:
+        pl["name"] = name[:100]
+        _save_playlists()
+    return pl
+
+
+@app.delete("/api/playlists/{pid}")
+def delete_playlist(pid: str):
+    """플레이리스트만 삭제 — 곡(라이브러리)은 건드리지 않음."""
+    with _lock:
+        if PLAYLISTS.pop(pid, None) is None:
+            raise HTTPException(status_code=404, detail="플레이리스트를 찾을 수 없습니다.")
+        _save_playlists()
+    return {"ok": True}
+
+
+@app.post("/api/playlists/{pid}/tracks/{track_id}")
+def add_playlist_track(pid: str, track_id: str):
+    """곡을 플리에 추가. 같은 곡을 여러 플리에 넣을 수 있고, 라이브러리에서는 안 사라짐."""
+    pl = PLAYLISTS.get(pid)
+    if not pl:
+        raise HTTPException(status_code=404, detail="플레이리스트를 찾을 수 없습니다.")
+    if track_id not in TRACKS:
+        raise HTTPException(status_code=404, detail="트랙을 찾을 수 없습니다.")
+    with _lock:
+        if track_id not in pl["track_ids"]:
+            pl["track_ids"].append(track_id)
+            _save_playlists()
+    return pl
+
+
+@app.delete("/api/playlists/{pid}/tracks/{track_id}")
+def remove_playlist_track(pid: str, track_id: str):
+    pl = PLAYLISTS.get(pid)
+    if not pl:
+        raise HTTPException(status_code=404, detail="플레이리스트를 찾을 수 없습니다.")
+    with _lock:
+        if track_id in pl["track_ids"]:
+            pl["track_ids"].remove(track_id)
+            _save_playlists()
+    return pl
+
+
 class RenameRequest(BaseModel):
     title: str
 
@@ -422,6 +503,15 @@ def delete_track(track_id: str):
         parent["stems"].get("files", {}).pop(track.get("stem", ""), None)
         if not parent["stems"].get("files"):
             parent.pop("stems", None)  # 전부 지웠으면 다시 분리 가능하게
+
+    # 삭제된 곡(및 자식 스템)을 모든 플레이리스트에서 정리
+    changed = False
+    for pl in PLAYLISTS.values():
+        before = len(pl["track_ids"])
+        pl["track_ids"] = [t for t in pl["track_ids"] if t in TRACKS]
+        changed = changed or len(pl["track_ids"]) != before
+    if changed:
+        _save_playlists()
 
     _save_tracks()
     return {"ok": True}
