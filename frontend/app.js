@@ -214,7 +214,7 @@ function addTrackToList(track) {
       <a class="btn-ghost" href="${track.download_url}" download aria-label="${escHtml(track.title)} 다운로드">⬇ 다운</a>
       <button class="btn-primary" data-action="mixer" aria-label="믹서에 추가">+믹서</button>
       <button class="btn-outline" data-action="pad" aria-label="샘플러 패드에 추가">+패드</button>
-      <button class="btn-ghost"  data-action="playlist" aria-label="플레이리스트에 추가">+목록</button>
+      <button class="btn-ghost"  data-action="playlist" aria-label="플레이리스트에 추가">+플리</button>
       ${isStem ? '' : '<button class="btn-outline" data-action="stems">스템 분리</button>'}
       <button class="btn-danger" data-action="delete" aria-label="${escHtml(track.title)} 삭제">🗑</button>
     </div>
@@ -474,6 +474,7 @@ uploadDrop.addEventListener('drop', e => {
 (async () => {
   await refreshTracks();
   restoreProject();
+  loadPlaylists();
   // 대기열 렌더 + 남은 작업 있으면 폴링 재개 (없으면 한 번 그리고 알아서 멈춤)
   startQueuePolling();
 })();
@@ -1831,84 +1832,180 @@ document.querySelectorAll('.deck-sync-btn').forEach(btn => {
 // ─────────────────────────────────────────────
 // Playlist
 // ─────────────────────────────────────────────
-const playlist = [];
-let plIndex = -1;
+// 서버 저장 플레이리스트: 이름 있는 폴더처럼, 한 곡을 여러 플리에 담을 수 있음.
+// 플리에 담아도 최근 추출(라이브러리)에서는 사라지지 않음 — 삭제는 직접.
+let playlists = [];      // [{id, name, track_ids}]
+let plNowIds = [];       // 지금 재생 중인 곡 id 목록
+let plNowIndex = -1;
+let plNowName = '';
+const expandedPls = new Set();
 
-const plEmpty  = document.getElementById('pl-empty');
-const plListEl = document.getElementById('pl-list');
-const plNow    = document.getElementById('pl-now');
-const plAudio  = document.getElementById('pl-audio');
-const plLabel  = document.getElementById('pl-label');
+const myplList  = document.getElementById('mypl-list');
+const myplEmpty = document.getElementById('mypl-empty');
+const plNow     = document.getElementById('pl-now');
+const plAudio   = document.getElementById('pl-audio');
+const plLabel   = document.getElementById('pl-label');
 
-function addToPlaylist(track) {
-  if (playlist.find(t => t.id === track.id)) {
-    setStatus(`"${track.title}" 이미 플레이리스트에 있어요`, 'error');
-    return;
-  }
-  playlist.push(track);
-  renderPlaylist();
-  scheduleSave();
-  document.querySelector('[data-tab="playlist"]').click();
+function trackById(id) { return tracks.find(t => t.id === id); }
+
+async function loadPlaylists() {
+  try { playlists = await (await fetch('/api/playlists')).json(); } catch { playlists = []; }
+  renderPlaylists();
 }
 
-function removeFromPlaylist(idx) {
-  if (plIndex === idx) { plAudio.pause(); plNow.style.display = 'none'; plIndex = -1; }
-  else if (plIndex > idx) plIndex--;
-  playlist.splice(idx, 1);
-  renderPlaylist();
-  scheduleSave();
-}
-
-function renderPlaylist() {
-  plListEl.innerHTML = '';
-  const empty = playlist.length === 0;
-  plEmpty.style.display = empty ? '' : 'none';
-  plListEl.style.display = empty ? 'none' : '';
-  playlist.forEach((t, i) => {
+function renderPlaylists() {
+  myplEmpty.style.display = playlists.length ? 'none' : '';
+  myplList.innerHTML = '';
+  playlists.forEach(pl => {
+    const open = expandedPls.has(pl.id);
     const li = document.createElement('li');
-    li.className = 'pl-item' + (i === plIndex ? ' pl-active' : '');
+    li.className = 'mypl-item';
+    let rows = '';
+    if (open) {
+      const items = pl.track_ids.map((tid, i) => {
+        const t = trackById(tid);
+        return `<li>
+          <span class="pl-num">${i + 1}</span>
+          <span class="pl-title">${escHtml(t ? t.title : '(삭제된 곡)')}</span>
+          <button class="btn-ghost" data-act="playfrom" data-i="${i}" aria-label="여기부터 재생">▶</button>
+          <button class="pl-rm" data-act="rmtrack" data-tid="${escHtml(tid)}" aria-label="플리에서 제거">✕</button>
+        </li>`;
+      }).join('');
+      rows = '<ol class="mypl-tracks">' + items + '</ol>';
+    }
     li.innerHTML = `
-      <span class="pl-num">${i + 1}</span>
-      <span class="pl-title">${escHtml(t.title)}</span>
-      <span class="pl-dur">${fmtTime(t.duration)}</span>
-      <button class="pl-rm" aria-label="제거">✕</button>
-    `;
-    li.querySelector('.pl-rm').addEventListener('click', e => { e.stopPropagation(); removeFromPlaylist(i); });
-    li.addEventListener('click', e => { if (!e.target.classList.contains('pl-rm')) playPlaylistTrack(i); });
-    plListEl.appendChild(li);
+      <div class="mypl-header" data-act="toggle">
+        <span class="mypl-arrow">${open ? '▾' : '▸'}</span>
+        <span class="mypl-name">${escHtml(pl.name)}</span>
+        <span class="mypl-count">${pl.track_ids.length}곡</span>
+        <span class="mypl-actions">
+          <button class="btn-primary" data-act="play" aria-label="재생">▶</button>
+          <button class="btn-ghost" data-act="renamepl" aria-label="이름 변경">✏</button>
+          <button class="btn-danger" data-act="delpl" aria-label="플레이리스트 삭제">🗑</button>
+        </span>
+      </div>
+      ${rows}`;
+    li.addEventListener('click', async e => {
+      const el = e.target.closest('[data-act]');
+      if (!el) return;
+      const act = el.dataset.act;
+      if (act === 'toggle') {
+        expandedPls.has(pl.id) ? expandedPls.delete(pl.id) : expandedPls.add(pl.id);
+        renderPlaylists();
+      } else if (act === 'play') {
+        playPlaylist(pl, 0);
+      } else if (act === 'playfrom') {
+        playPlaylist(pl, +el.dataset.i);
+      } else if (act === 'renamepl') {
+        const name = prompt('플레이리스트 이름', pl.name);
+        if (name?.trim()) {
+          await fetch(`/api/playlists/${pl.id}`, { method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() }) }).catch(() => {});
+          loadPlaylists();
+        }
+      } else if (act === 'delpl') {
+        if (!confirm(`"${pl.name}" 플레이리스트를 삭제할까요? (곡은 최근 추출에 그대로 남아요)`)) return;
+        await fetch(`/api/playlists/${pl.id}`, { method: 'DELETE' }).catch(() => {});
+        loadPlaylists();
+      } else if (act === 'rmtrack') {
+        await fetch(`/api/playlists/${pl.id}/tracks/${el.dataset.tid}`, { method: 'DELETE' }).catch(() => {});
+        loadPlaylists();
+      }
+    });
+    myplList.appendChild(li);
   });
 }
 
-function playPlaylistTrack(idx) {
-  if (idx < 0 || idx >= playlist.length) return;
-  plIndex = idx;
-  const t = playlist[idx];
+document.getElementById('pl-create').addEventListener('click', async () => {
+  const name = prompt('새 플레이리스트 이름');
+  if (!name?.trim()) return;
+  try {
+    const res = await fetch('/api/playlists', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() }) });
+    if (!res.ok) throw new Error((await res.json()).detail || '생성 실패');
+    await loadPlaylists();
+  } catch (err) { setStatus(err.message, 'error'); }
+});
+
+function playPlaylist(pl, startIdx) {
+  plNowIds = pl.track_ids.filter(id => trackById(id));
+  if (!plNowIds.length) { setStatus('플레이리스트가 비어있어요', 'error'); return; }
+  plNowName = pl.name;
+  plNowIndex = Math.min(startIdx, plNowIds.length - 1);
+  playCurrentPlTrack();
+}
+
+function playCurrentPlTrack() {
+  const t = trackById(plNowIds[plNowIndex]);
+  if (!t) return;
   plAudio.src = t.stream_url;
   plAudio.play();
   plNow.style.display = '';
-  plLabel.textContent = `▶ ${t.title}`;
-  renderPlaylist();
+  plLabel.textContent = `▶ ${t.title} — ${plNowName} (${plNowIndex + 1}/${plNowIds.length})`;
 }
 
 plAudio.addEventListener('ended', () => {
-  if (plIndex + 1 < playlist.length) playPlaylistTrack(plIndex + 1);
-  else { plIndex = -1; plNow.style.display = 'none'; renderPlaylist(); }
+  if (plNowIndex + 1 < plNowIds.length) {
+    plNowIndex++;
+    playCurrentPlTrack();
+  } else {
+    plNow.style.display = 'none';
+    plNowIndex = -1;
+  }
 });
 
-document.getElementById('pl-play').addEventListener('click', () => {
-  if (plAudio.src && plAudio.paused && plIndex >= 0) plAudio.play();
-  else if (playlist.length > 0) playPlaylistTrack(Math.max(0, plIndex));
-});
-document.getElementById('pl-stop').addEventListener('click', () => {
-  plAudio.pause(); plAudio.currentTime = 0;
-  plNow.style.display = 'none'; plIndex = -1; renderPlaylist();
-});
-document.getElementById('pl-clear').addEventListener('click', () => {
-  plAudio.pause(); playlist.length = 0; plIndex = -1;
-  plNow.style.display = 'none'; renderPlaylist(); scheduleSave();
-});
+// ── 곡의 [+플리] → 여러 플리에 동시 추가하는 선택창 ──
+const plPicker      = document.getElementById('pl-picker');
+const plPickerList  = document.getElementById('pl-picker-list');
+const plPickerTitle = document.getElementById('pl-picker-title');
+let plPickerTrack = null;
 
-renderPlaylist();
+function addToPlaylist(track) {
+  plPickerTrack = track;
+  plPickerTitle.textContent = `"${track.title}" 플레이리스트에 추가`;
+  renderPlPicker();
+  plPicker.style.display = 'flex';
+}
+
+function renderPlPicker() {
+  plPickerList.innerHTML = '';
+  if (!playlists.length) {
+    plPickerList.innerHTML = '<li style="color:var(--muted);font-size:.82rem;padding:10px">플레이리스트가 없어요 — 아래 버튼으로 만들어 보세요</li>';
+    return;
+  }
+  playlists.forEach(pl => {
+    const inPl = pl.track_ids.includes(plPickerTrack.id);
+    const li = document.createElement('li');
+    li.className = 'picker-item';
+    li.innerHTML = `<span>${inPl ? '✅' : '⬜'} ${escHtml(pl.name)}</span><span class="picker-dur">${pl.track_ids.length}곡</span>`;
+    li.addEventListener('click', async () => {
+      try {
+        const res = await fetch(`/api/playlists/${pl.id}/tracks/${plPickerTrack.id}`,
+          { method: inPl ? 'DELETE' : 'POST' });
+        if (res.ok) pl.track_ids = (await res.json()).track_ids;
+      } catch {}
+      renderPlPicker();
+      renderPlaylists();
+    });
+    plPickerList.appendChild(li);
+  });
+}
+
+document.getElementById('pl-picker-new').addEventListener('click', async () => {
+  const name = prompt('새 플레이리스트 이름');
+  if (!name?.trim() || !plPickerTrack) return;
+  try {
+    const res = await fetch('/api/playlists', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() }) });
+    if (!res.ok) throw new Error((await res.json()).detail || '생성 실패');
+    const pl = await res.json();
+    await fetch(`/api/playlists/${pl.id}/tracks/${plPickerTrack.id}`, { method: 'POST' });
+    await loadPlaylists();
+    renderPlPicker();
+  } catch (err) { setStatus(err.message, 'error'); }
+});
+document.getElementById('pl-picker-close').addEventListener('click', () => { plPicker.style.display = 'none'; });
+plPicker.addEventListener('click', e => { if (e.target === plPicker) plPicker.style.display = 'none'; });
 
 // ─────────────────────────────────────────────
 // Recording (AudioWorklet — audio 스레드에서 무손실 PCM 캡처)
@@ -2097,7 +2194,6 @@ function saveProject() {
       ? { id: p.id, padVolume: p.padVolume ?? 1, padPitch: p.padPitch ?? 0, padMode: p.padMode ?? 'oneshot',
           trimStart: p.trimStart ?? null, trimEnd: p.trimEnd ?? null, title: p.title }
       : null),
-    playlist: playlist.filter(t => !t.id.startsWith('rec_')).map(t => t.id),
   };
   localStorage.setItem(SAVE_KEY, JSON.stringify(state));
   const ind = document.getElementById('save-indicator');
@@ -2145,12 +2241,6 @@ function restoreProject() {
     };
   });
   renderPads();
-
-  (state.playlist || []).forEach(id => {
-    const t = tracks.find(tr => tr.id === id);
-    if (t && !playlist.find(p => p.id === id)) playlist.push(t);
-  });
-  renderPlaylist();
 }
 
 // ─────────────────────────────────────────────

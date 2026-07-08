@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
 <title>뮤직믹서</title>
-<link rel="stylesheet" href="style.css?v=15" />
+<link rel="stylesheet" href="style.css?v=16" />
 </head>
 <body>
   <div class="app">
@@ -53,15 +53,9 @@
         </div>
         <p id="upload-status" class="status" role="status" aria-live="polite"></p>
       </section>
-      <section class="tracks-section">
-        <p class="section-label">추출된 트랙</p>
-        <div id="track-empty-state" class="track-empty-state">
-          <span>🎵</span>
-          <span>아직 추출된 트랙이 없어요</span>
-          <span style="font-size:.78rem">위에 유튜브 링크를 붙여넣고 추출해보세요</span>
-        </div>
-        <ul id="track-list" class="track-list" aria-label="추출된 트랙 목록"></ul>
-      </section>
+      <p class="sampler-hint" style="margin-top:18px">
+        추출·업로드된 곡은 <strong>플레이리스트 탭 → 최근 추출</strong>에 쌓여요
+      </p>
     </div>
 
     <!-- 믹서 탭 -->
@@ -337,27 +331,47 @@
     <!-- 플레이리스트 탭 -->
     <div id="tab-playlist" class="tab-panel" role="tabpanel">
       <div class="playlist-wrap">
-        <div class="playlist-head">
-          <p class="section-label">플레이리스트</p>
-          <div class="playlist-controls">
-            <button id="pl-play" class="transport-btn">▶</button>
-            <button id="pl-stop" class="transport-btn">⏹</button>
-            <button id="pl-clear" class="btn-ghost">🗑 초기화</button>
-          </div>
-        </div>
-        <div id="pl-empty" class="track-empty-state">
-          <span>📋</span>
-          <span>플레이리스트가 비어있어요</span>
-          <span style="font-size:.78rem">추출 탭에서 [+목록] 버튼으로 추가하세요</span>
-        </div>
-        <ol id="pl-list" class="pl-list"></ol>
         <div id="pl-now" class="pl-now" style="display:none">
           <audio id="pl-audio" controls preload="auto"></audio>
           <p id="pl-label" class="pl-label"></p>
         </div>
+
+        <section class="mypl-section">
+          <div class="playlist-head">
+            <p class="section-label">내 플레이리스트</p>
+            <button id="pl-create" class="btn-outline">＋ 새 플레이리스트</button>
+          </div>
+          <div id="mypl-empty" class="track-empty-state">
+            <span>📋</span>
+            <span>아직 플레이리스트가 없어요</span>
+            <span style="font-size:.78rem">위 버튼으로 만들고, 곡의 [+플리]로 담으세요</span>
+          </div>
+          <ul id="mypl-list" class="mypl-list" aria-label="내 플레이리스트"></ul>
+        </section>
+
+        <section class="tracks-section">
+          <p class="section-label">최근 추출</p>
+          <div id="track-empty-state" class="track-empty-state">
+            <span>🎵</span>
+            <span>아직 추출된 곡이 없어요</span>
+            <span style="font-size:.78rem">추출 탭에서 유튜브 링크를 붙여넣어 보세요</span>
+          </div>
+          <ul id="track-list" class="track-list" aria-label="최근 추출 곡 목록"></ul>
+        </section>
       </div>
     </div>
 
+  </div>
+
+  <!-- 플레이리스트 선택 오버레이 (한 곡을 여러 플리에 추가) -->
+  <div class="track-picker-overlay" id="pl-picker" style="display:none"
+       role="dialog" aria-modal="true" aria-label="플레이리스트에 추가">
+    <div class="track-picker-box">
+      <p class="section-label" id="pl-picker-title">플레이리스트에 추가</p>
+      <ul class="picker-list" id="pl-picker-list"></ul>
+      <button class="btn-outline" id="pl-picker-new">＋ 새 플레이리스트 만들어 추가</button>
+      <button class="btn-ghost" id="pl-picker-close">완료</button>
+    </div>
   </div>
 
   <!-- 패드 개별 설정 오버레이 -->
@@ -386,6 +400,6 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js"></script>
-  <script src="app.js?v=15"></script>
+  <script src="app.js?v=16"></script>
 </body>
 </html>
