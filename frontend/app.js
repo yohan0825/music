@@ -266,7 +266,7 @@ function updateStemButton(li, track) {
     st === 'failed'     ? '분리 재시도' : '스템 분리';
   btn.title = st === 'failed'
     ? (track.stems?.error || '분리 실패 — 다시 시도')
-    : '보컬/드럼/베이스/멜로디 4개 트랙으로 분리 (집 PC 필요, 몇 분 걸림)';
+    : '보컬/드럼/베이스/멜로디 4개 트랙으로 분리 (고품질 모델, 집 PC 필요, 곡당 10분 이상 걸릴 수 있어요)';
 }
 
 async function renameTrack(track, li) {

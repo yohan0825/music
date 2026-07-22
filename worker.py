@@ -37,7 +37,7 @@ POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", "5"))  # 초
 
 # 스템 분리용 ML 파이썬 (torch가 무거워 별도 venv, 작업마다 subprocess로 호출해 메모리 반환)
 ML_PYTHON = os.environ.get("ML_PYTHON", str(Path(__file__).resolve().parent / "mlenv" / "Scripts" / "python.exe"))
-DEMUCS_MODEL = os.environ.get("DEMUCS_MODEL", "htdemucs")
+DEMUCS_MODEL = os.environ.get("DEMUCS_MODEL", "htdemucs_ft")  # 4모델 앙상블 — 기본형보다 느리지만 분리 품질 좋음
 STEM_NAMES = ("vocals", "drums", "bass", "other")
 
 # ── 로깅 ─────────────────────────────────────────
@@ -191,7 +191,7 @@ def process_separate(job: dict):
                 resp = httpx.post(
                     f"{RAILWAY_URL}/api/tracks/{track_id}/stems",
                     files={s: (f"{s}.mp3", f, "audio/mpeg") for s, f in handles.items()},
-                    data={"queue_id": qid, "token": WORKER_TOKEN},
+                    data={"queue_id": qid, "token": WORKER_TOKEN, "model": DEMUCS_MODEL},
                     timeout=600,
                 )
             finally:

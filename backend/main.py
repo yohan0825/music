@@ -165,11 +165,11 @@ def enqueue_separate(track_id: str):
     with _lock:
         QUEUE[qid] = {"id": qid, "type": "separate", "track_id": track_id,
                       "status": "pending", "title": f"{track['title']} (스템 분리)", "error": None}
-        track["stems"] = {"status": "queued", "model": "htdemucs"}
+        track["stems"] = {"status": "queued"}  # 실제 모델명은 워커가 결과 업로드 시 채움
         _save_queue()
         _save_tracks()
     return {"queued": True, "queue_id": qid,
-            "message": "스템 분리 대기열에 추가됐어요. 곡 길이에 따라 몇 분 걸려요."}
+            "message": "스템 분리 대기열에 추가됐어요. 고품질 모델이라 곡당 10분 이상 걸릴 수 있어요."}
 
 
 @app.get("/api/queue")
@@ -344,6 +344,7 @@ async def upload_stems(
     other: UploadFile = File(...),
     queue_id: str = Form(""),
     token: str = Form(""),
+    model: str = Form("htdemucs"),
 ):
     """워커가 분리 결과(스템 4개 mp3)를 올린다. 각 스템은 자식 트랙으로 등록돼
     기존 재생/믹서/패드 흐름을 그대로 탄다."""
@@ -376,7 +377,7 @@ async def upload_stems(
                 "stem_of": track_id,
                 "stem": stem,
             }
-        track["stems"] = {"status": "done", "model": "htdemucs", "files": files}
+        track["stems"] = {"status": "done", "model": model[:50], "files": files}
         if queue_id:
             QUEUE.pop(queue_id, None)
             _save_queue()
