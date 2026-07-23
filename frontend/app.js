@@ -234,13 +234,28 @@ function addTrackToList(track) {
     if (action === 'stems')    requestStems(track, li);
   });
 
-  // 스템은 원곡 항목 아래에 중첩 표시
+  // 스템은 원곡 항목 아래에 중첩 표시 ("합치기" 행이 있으면 그 위에 끼워 넣어 항상 맨 아래 고정)
   if (isStem) {
     const holder = trackListEl.querySelector(`li[data-id="${track.stem_of}"] .stem-list`);
-    if (holder) { holder.appendChild(li); return; }
+    if (holder) {
+      const mergeRow = holder.querySelector('.stem-merge-row');
+      mergeRow ? holder.insertBefore(li, mergeRow) : holder.appendChild(li);
+      ensureStemMergeRow(holder, track.stem_of);
+      return;
+    }
   }
   trackListEl.prepend(li);
   updateStemButton(li, track);
+}
+
+// 스템이 2개 이상 쌓이면 "합치기" 진입 행을 목록 끝에 한 번만 만든다
+function ensureStemMergeRow(holder, parentId) {
+  if (holder.children.length < 2 || holder.querySelector('.stem-merge-row')) return;
+  const row = document.createElement('li');
+  row.className = 'stem-merge-row';
+  row.innerHTML = '<button class="btn-outline">스템 합치기…</button>';
+  row.querySelector('button').addEventListener('click', () => openStemMergePicker(parentId));
+  holder.appendChild(row);
 }
 
 async function requestStems(track, li) {
@@ -2402,6 +2417,24 @@ function floatTo16Bit(f32) {
   return i16;
 }
 
+// AudioBuffer(스테레오) → MP3 Blob. 믹서 내보내기와 스템 합치기가 공용으로 씀.
+function encodeMp3Blob(rendered, bitrate = 192) {
+  if (typeof lamejs === 'undefined') throw new Error('MP3 라이브러리 로딩 실패 (인터넷 연결 확인)');
+  const left = rendered.getChannelData(0);
+  const right = rendered.numberOfChannels > 1 ? rendered.getChannelData(1) : left;
+  const l16 = floatTo16Bit(left), r16 = floatTo16Bit(right);
+  const enc = new lamejs.Mp3Encoder(2, rendered.sampleRate, bitrate);
+  const BLOCK = 1152;
+  const chunks = [];
+  for (let i = 0; i < l16.length; i += BLOCK) {
+    const buf = enc.encodeBuffer(l16.subarray(i, i + BLOCK), r16.subarray(i, i + BLOCK));
+    if (buf.length) chunks.push(new Uint8Array(buf));
+  }
+  const end = enc.flush();
+  if (end.length) chunks.push(new Uint8Array(end));
+  return new Blob(chunks, { type: 'audio/mp3' });
+}
+
 document.getElementById('mixer-mp3').addEventListener('click', async () => {
   if (!mixerTracks.length) { setStatus('믹서에 트랙이 없어요', 'error'); return; }
   if (typeof lamejs === 'undefined') { setStatus('MP3 라이브러리 로딩 실패 (인터넷 연결 확인)', 'error'); return; }
@@ -2412,19 +2445,7 @@ document.getElementById('mixer-mp3').addEventListener('click', async () => {
 
   try {
     const rendered = await renderMixdown();
-    const left = rendered.getChannelData(0);
-    const right = rendered.numberOfChannels > 1 ? rendered.getChannelData(1) : left;
-    const l16 = floatTo16Bit(left), r16 = floatTo16Bit(right);
-    const enc = new lamejs.Mp3Encoder(2, rendered.sampleRate, 192);
-    const BLOCK = 1152;
-    const chunks = [];
-    for (let i = 0; i < l16.length; i += BLOCK) {
-      const buf = enc.encodeBuffer(l16.subarray(i, i + BLOCK), r16.subarray(i, i + BLOCK));
-      if (buf.length) chunks.push(new Uint8Array(buf));
-    }
-    const end = enc.flush();
-    if (end.length) chunks.push(new Uint8Array(end));
-    const blob = new Blob(chunks, { type: 'audio/mp3' });
+    const blob = encodeMp3Blob(rendered);
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url; a.download = `mix_${Date.now()}.mp3`; a.click();
@@ -2436,6 +2457,105 @@ document.getElementById('mixer-mp3').addEventListener('click', async () => {
     btn.disabled = false;
   }
 });
+
+// ─────────────────────────────────────────────
+// 스템 합치기 — 워커/큐 없이 브라우저에서 바로 선택한 스템만 합쳐
+// 새 곡으로 라이브러리에 저장 (집 PC 꺼져 있어도 됨)
+// ─────────────────────────────────────────────
+const STEM_LABEL = { vocals: '보컬', drums: '드럼', bass: '베이스', other: '멜로디' };
+const stemMergePicker  = document.getElementById('stem-merge-picker');
+const stemMergeList    = document.getElementById('stem-merge-list');
+const stemMergeTitleEl = document.getElementById('stem-merge-title');
+let mergeParentId = null;
+let mergeSelected = new Set();
+
+function openStemMergePicker(parentId) {
+  const parent = trackById(parentId);
+  const files = parent?.stems?.files || {};
+  if (Object.keys(files).length < 2) {
+    setStatus('합칠 스템이 2개 이상 있어야 해요', 'error');
+    return;
+  }
+  mergeParentId = parentId;
+  mergeSelected = new Set(Object.keys(files)); // 기본은 전체 선택 — 체크 해제해서 뺄 것만 고름
+  stemMergeTitleEl.textContent = `"${parent.title}" 스템 합치기`;
+  renderStemMergeList();
+  stemMergePicker.style.display = 'flex';
+}
+
+function renderStemMergeList() {
+  const parent = trackById(mergeParentId);
+  const files = parent?.stems?.files || {};
+  stemMergeList.innerHTML = '';
+  Object.keys(files).forEach(stemName => {
+    const li = document.createElement('li');
+    li.className = 'picker-item';
+    li.innerHTML = `
+      <label style="display:flex;align-items:center;gap:8px;width:100%;cursor:pointer">
+        <input type="checkbox" data-stem="${stemName}" ${mergeSelected.has(stemName) ? 'checked' : ''}>
+        <span>${STEM_LABEL[stemName] || stemName}</span>
+      </label>`;
+    li.querySelector('input').addEventListener('change', e => {
+      if (e.target.checked) mergeSelected.add(stemName);
+      else mergeSelected.delete(stemName);
+    });
+    stemMergeList.appendChild(li);
+  });
+}
+
+// 선택한 스템 버퍼들을 한 OfflineAudioContext에서 합산 (믹서 다운믹스와 동일한 리미터 적용)
+async function renderStemMix(buffers) {
+  const sr = buffers[0].sampleRate;
+  const numCh = Math.max(...buffers.map(b => b.numberOfChannels));
+  const length = Math.max(...buffers.map(b => b.length));
+  const offCtx = new OfflineAudioContext(numCh, length, sr);
+  const limiter = offCtx.createDynamicsCompressor();
+  limiter.threshold.value = -3; limiter.knee.value = 3;
+  limiter.ratio.value = 20; limiter.attack.value = 0.001; limiter.release.value = 0.1;
+  limiter.connect(offCtx.destination);
+  buffers.forEach(buf => {
+    const src = offCtx.createBufferSource();
+    src.buffer = buf;
+    src.connect(limiter);
+    src.start(0);
+  });
+  return offCtx.startRendering();
+}
+
+document.getElementById('stem-merge-confirm').addEventListener('click', async () => {
+  if (mergeSelected.size < 2) { setStatus('2개 이상 선택해주세요', 'error'); return; }
+  const parent = trackById(mergeParentId);
+  const stemNames = [...mergeSelected];
+  const btn = document.getElementById('stem-merge-confirm');
+  btn.disabled = true;
+  setStatus('스템 불러오는 중…', '');
+  try {
+    const buffers = await Promise.all(stemNames.map(s => loadBuffer(`${mergeParentId}_${s}`)));
+    setStatus('합치는 중…', '');
+    const mixed = await renderStemMix(buffers);
+    const blob = encodeMp3Blob(mixed);
+    const label = stemNames.map(s => STEM_LABEL[s] || s).join('+');
+    const title = `${parent.title} (${label})`;
+
+    setStatus('저장하는 중…', '');
+    const fd = new FormData();
+    fd.append('file', blob, `${title}.mp3`);
+    fd.append('title', title);
+    const res = await fetch('/api/upload', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || '저장 실패');
+
+    addTrackToList({ ...data, stream_url: `/api/audio/${data.id}`, download_url: `/api/audio/${data.id}?download=1` });
+    setStatus(`"${title}" 만들었어요`, 'success');
+    stemMergePicker.style.display = 'none';
+  } catch (err) {
+    setStatus(err.message, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+});
+document.getElementById('stem-merge-cancel').addEventListener('click', () => { stemMergePicker.style.display = 'none'; });
+stemMergePicker.addEventListener('click', e => { if (e.target === stemMergePicker) stemMergePicker.style.display = 'none'; });
 
 // ─────────────────────────────────────────────
 // Key Lock (Master Tempo) — OLA time-stretch via Web Worker

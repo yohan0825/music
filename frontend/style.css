@@ -1568,6 +1568,8 @@ input, textarea {
 }
 .stem-list:empty { display: none; }
 .stem-item .track-title { color: #4af; font-size: .8rem; }
+.stem-merge-row { padding: 4px 0 2px; }
+.stem-merge-row button { width: 100%; }
 
 /* ─── Extract queue ──────────────────────────── */
 .queue-section { margin-top: 14px; }

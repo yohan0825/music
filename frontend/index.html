@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
 <title>뮤직믹서</title>
-<link rel="stylesheet" href="style.css?v=16" />
+<link rel="stylesheet" href="style.css?v=17" />
 </head>
 <body>
   <div class="app">
@@ -363,6 +363,17 @@
 
   </div>
 
+  <!-- 스템 합치기 오버레이 (선택한 스템들만 하나의 곡으로 합쳐 라이브러리에 추가) -->
+  <div class="track-picker-overlay" id="stem-merge-picker" style="display:none"
+       role="dialog" aria-modal="true" aria-label="스템 합치기">
+    <div class="track-picker-box">
+      <p class="section-label" id="stem-merge-title">스템 합치기</p>
+      <ul class="picker-list" id="stem-merge-list"></ul>
+      <button class="btn-primary" id="stem-merge-confirm">합쳐서 새 곡으로 저장</button>
+      <button class="btn-ghost" id="stem-merge-cancel">취소</button>
+    </div>
+  </div>
+
   <!-- 플레이리스트 선택 오버레이 (한 곡을 여러 플리에 추가) -->
   <div class="track-picker-overlay" id="pl-picker" style="display:none"
        role="dialog" aria-modal="true" aria-label="플레이리스트에 추가">
@@ -400,6 +411,6 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js"></script>
-  <script src="app.js?v=16"></script>
+  <script src="app.js?v=17"></script>
 </body>
 </html>
