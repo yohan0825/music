@@ -35,6 +35,16 @@ else:
     DOWNLOAD_DIR = Path("/tmp/music_downloads")
 DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
+if not DATA_DIR and os.name != "nt":
+    # Railway 볼륨(DATA_DIR)이 없으면 /tmp를 쓰는데, 배포마다 컨테이너가 새로
+    # 만들어지면서 /tmp가 통째로 사라진다 — 곡/플레이리스트가 재배포 때마다 증발함.
+    # 즉시 눈에 띄게 경고 (Railway Volumes 설정 + DATA_DIR 환경변수로 해결).
+    print("=" * 70, flush=True)
+    print("경고: DATA_DIR 환경변수가 없어 임시 폴더(/tmp)를 사용 중입니다.", flush=True)
+    print("재배포할 때마다 여기 저장된 곡/플레이리스트가 전부 사라집니다!", flush=True)
+    print("Railway에서 Volume을 만들고 DATA_DIR 환경변수를 그 경로로 설정하세요.", flush=True)
+    print("=" * 70, flush=True)
+
 TRACKS_FILE = DOWNLOAD_DIR / "tracks.json"
 QUEUE_FILE = DOWNLOAD_DIR / "queue.json"
 PLAYLISTS_FILE = DOWNLOAD_DIR / "playlists.json"
