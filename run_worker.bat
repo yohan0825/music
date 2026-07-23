@@ -5,4 +5,4 @@ set RAILWAY_URL=https://music-mixer.up.railway.app
 set WORKER_TOKEN=
 
 cd /d "%~dp0"
-pythonw worker.py
+"%LOCALAPPDATA%\Microsoft\WindowsApps\pythonw.exe" worker.py
