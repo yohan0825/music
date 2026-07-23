@@ -215,10 +215,10 @@ function addTrackToList(track) {
       <button class="btn-primary" data-action="mixer" aria-label="믹서에 추가">+믹서</button>
       <button class="btn-outline" data-action="pad" aria-label="샘플러 패드에 추가">+패드</button>
       <button class="btn-ghost"  data-action="playlist" aria-label="플레이리스트에 추가">+플리</button>
-      ${isStem ? '' : '<button class="btn-outline" data-action="stems">스템 분리</button>'}
+      ${isStem ? '' : '<button class="btn-outline stem-action-btn" data-action="stems">스템 분리</button>'}
       <button class="btn-danger" data-action="delete" aria-label="${escHtml(track.title)} 삭제">🗑</button>
     </div>
-    ${isStem ? '' : '<ul class="stem-list"></ul>'}
+    ${isStem ? '' : '<ul class="stem-list collapsed"></ul>'}
   `;
   li.addEventListener('click', e => {
     const action = e.target.dataset.action;
@@ -232,6 +232,7 @@ function addTrackToList(track) {
     if (action === 'delete')   removeTrack(track.id, li);
     if (action === 'rename')   renameTrack(track, li);
     if (action === 'stems')    requestStems(track, li);
+    if (action === 'togglestems') toggleStemList(track, li);
   });
 
   // 스템은 원곡 항목 아래에 중첩 표시 ("합치기" 행이 있으면 그 위에 끼워 넣어 항상 맨 아래 고정)
@@ -247,6 +248,8 @@ function addTrackToList(track) {
   trackListEl.prepend(li);
   updateStemButton(li, track);
 }
+
+const expandedStems = new Set(); // 펼쳐진 상태로 표시 중인 원곡 id들
 
 // 스템이 2개 이상 쌓이면 "합치기" 진입 행을 목록 끝에 한 번만 만든다
 function ensureStemMergeRow(holder, parentId) {
@@ -273,10 +276,24 @@ async function requestStems(track, li) {
 }
 
 function updateStemButton(li, track) {
-  const btn = li.querySelector('[data-action="stems"]');
+  const btn = li.querySelector('.stem-action-btn');
   if (!btn) return;
   const st = track.stems?.status;
-  if (st === 'done') { btn.style.display = 'none'; return; }
+
+  if (st === 'done') {
+    // 분리 끝나면 버튼이 펼치기/접기 토글로 바뀜 (스템 목록은 기본 접힘)
+    const expanded = expandedStems.has(track.id);
+    const count = Object.keys(track.stems?.files || {}).length;
+    btn.dataset.action = 'togglestems';
+    btn.disabled = false;
+    btn.title = '';
+    btn.textContent = expanded ? '스템 접기 ▾' : `스템 보기 (${count}) ▸`;
+    const holder = li.querySelector('.stem-list');
+    if (holder) holder.classList.toggle('collapsed', !expanded);
+    return;
+  }
+
+  btn.dataset.action = 'stems';
   btn.style.display = '';
   btn.disabled = st === 'queued' || st === 'processing';
   btn.textContent =
@@ -286,6 +303,13 @@ function updateStemButton(li, track) {
   btn.title = st === 'failed'
     ? (track.stems?.error || '분리 실패 — 다시 시도')
     : '보컬/드럼/베이스/멜로디 4개 트랙으로 분리 (고품질 모델, 집 PC 필요, 곡당 10분 이상 걸릴 수 있어요)';
+}
+
+function toggleStemList(track, li) {
+  const holder = li.querySelector('.stem-list');
+  if (!holder) return;
+  expandedStems.has(track.id) ? expandedStems.delete(track.id) : expandedStems.add(track.id);
+  updateStemButton(li, track);
 }
 
 async function renameTrack(track, li) {
