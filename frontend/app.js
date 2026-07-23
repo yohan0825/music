@@ -222,6 +222,10 @@ function addTrackToList(track) {
   `;
   li.addEventListener('click', e => {
     const action = e.target.dataset.action;
+    if (!action) return;
+    // 스템 항목은 원곡 li 안에 중첩돼 있어 이벤트가 버블링함 —
+    // 여기서 막지 않으면 원곡의 리스너까지 같은 액션을 한 번 더 실행해 중복 추가됨
+    e.stopPropagation();
     if (action === 'mixer')    addToMixer(track);
     if (action === 'pad')      addToPad(track);
     if (action === 'playlist') addToPlaylist(track);
